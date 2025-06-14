@@ -4,6 +4,7 @@ import cv2
 from pupil_apriltags import Detector
 import numpy as np
 from movement_func import *
+from helper_func import rot2eul
 
 AREA_TOLERANCE = 5000
 
