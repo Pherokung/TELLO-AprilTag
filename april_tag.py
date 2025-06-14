@@ -19,6 +19,13 @@ def calculate_center_offset(center, frame_width, frame_height):
     frame_center_y = frame_height // 2
     return (center[0] - frame_center_x, center[1] - frame_center_y)
 
+def calculate_offset_based_on_center(center, frame_width, frame_height, x, y):
+    """Calculate how far tag is from(frame_width // 2 + x, frame_height // 2 + y)"""
+    x_position = frame_width // 2 + x
+    y_position = frame_height // 2 + y
+    
+    return (center[0] - x_position, center[1] - y_position)
+
 def detect_apriltag(frame, detector):
     """
     Detect AprilTag in the given frame using the specified detector.
@@ -49,7 +56,10 @@ def detect_apriltag(frame, detector):
                 }
     return None
 
-def track_apriltag(tello, area, ox, oy, pError_yaw, pError_ud, target_area):
+def track_apriltag(tello, area, 
+                   ox, oy, 
+                   pError_yaw, pError_ud, 
+                   target_area):
     pid_yaw = [0.4, 0.4, 0]
     pid_ud = [0.2, 0.2, 0]
 
