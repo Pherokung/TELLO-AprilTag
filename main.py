@@ -8,6 +8,7 @@ import numpy as np
 from movement_func import *
 from april_tag import *
 from helper_func import *
+from track_and_align import *
 
 detector = Detector(
     families="tag36h11",
@@ -20,8 +21,7 @@ detector = Detector(
 )
 
 # Target parameters
-TARGET_AREA = 50000  # Target pixel area for the AprilTag
-AREA_TOLERANCE = 5000  # Acceptable range around target area
+TARGET_AREA = 30000  # Target pixel area for the AprilTag
 CENTER_THRESHOLD = 50  # How close to center we want to be (in pixels)
 
 # PID controller constants (tune these as needed)
@@ -29,7 +29,7 @@ KP_AREA = 0.1  # Forward/backward control
 KP_CENTER = 0.2  # Left/right control
 
 drone_took_off = False
-tag1 = False
+tag1 = 0
 pError_yaw = 0
 pError_ud = 0
 
@@ -81,7 +81,8 @@ if __name__ == "__main__":
             cv2.putText(frame, f"ID: {tag_id}", (center[0] - 10, center[1] - 20), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 255), 2)
             #cv2.putText(frame, f"Pos: ({float(pose_t[0]):.2f}, {float(pose_t[1]):.2f}, {float(pose_t[2]):.2f})", (center[0] - 10, center[1] + 20), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 255), 2)
             cv2.putText(frame, f"Area: ({area}, {TARGET_AREA})", (center[0] - 10, center[1] + 20), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 255), 2)
-            cv2.putText(frame, f"Offset: ({offset_x}, {offset_y})", (center[0] - 10, center[1] + 40), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 255), 2)
+            cv2.putText(frame, f"Angle & tag: ({angle[1]}, {tag1})", (center[0] - 10, center[1] + 40), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 255), 2)
+            #cv2.putText(frame, f"Tag1: ({tag1})", (center[0] - 10, center[1] + 40), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 255), 2)
 
         cv2.putText(frame, f"Battery: {tello.get_battery()}%", (10, 30), cv2.FONT_HERSHEY_SIMPLEX, 1, (0, 255, 0), 2)
         
@@ -97,19 +98,34 @@ if __name__ == "__main__":
             drone_took_off = True
             print("Tello took off.")
 
-        if drone_took_off and not tag1:
+        if drone_took_off:
             if tag_info:
-
-                pError_yaw, pError_ud = track_apriltag(
-                    tello, area, 
-                    offset_x, offset_y, 
-                    pError_yaw, pError_ud,
-                    TARGET_AREA
-                    )
+                # Move towards the tag
+                angle_threshold = 0.20
+                center_error_x = pose_t[0]  # meters, left/right translation
+                center_error_y = pose_t[1]  # meters, up/down translation
+                center_threshold = 0.10  # meters (10cm)
+                z_target = 3  # meters
+                z_error = pose_t[2] - z_target
+                # Check alignment
+                
+                if not is_tracking_done(area, TARGET_AREA, pError_yaw, pError_ud):
+                    pError_yaw, pError_ud = track_apriltag(
+                        tello, area, 
+                        offset_x, offset_y, 
+                        pError_yaw, pError_ud,
+                        TARGET_AREA
+                        )
+                    tag1 = 1
+                elif not is_aligning_done(angle, 0.2):
+                    aligning_angle(tello, angle, 0.2)
+                    tag1 = 2
+                else:
+                    tello.send_rc_control(0, 0, 0, 0)
+                    tag1 = 3
             else:
                 tello.send_rc_control(0, 0, 0, 0)
-        else:
-            tello.send_rc_control(0, 0, 0, 0)
+
 
     cv2.destroyAllWindows()
     tello.end()

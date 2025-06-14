@@ -6,8 +6,6 @@ import numpy as np
 from movement_func import *
 from helper_func import rot2eul
 
-AREA_TOLERANCE = 5000
-
 # AprilTag Functions
 
 def calculate_area(corners):
@@ -56,33 +54,3 @@ def detect_apriltag(frame, detector):
                     'angle': angle
                 }
     return None
-
-def track_apriltag(tello, area, 
-                   ox, oy, 
-                   pError_yaw, pError_ud, 
-                   target_area):
-    pid_yaw = [0.4, 0.4, 0]
-    pid_ud = [0.2, 0.2, 0]
-
-    error_yaw = ox
-    speed = pid_yaw[0] * error_yaw + pid_yaw[1] * (error_yaw - pError_yaw)
-    speed = int(np.clip(speed, -100, 100))
-
-    if area > target_area - AREA_TOLERANCE and area < target_area + AREA_TOLERANCE:
-        fb = 0
-    elif area > target_area + AREA_TOLERANCE:
-        fb = -20
-    elif area < target_area - AREA_TOLERANCE and area != 0:
-        fb = 20
-    
-    error_ud = -oy
-    ud = pid_ud[0] * error_ud + pid_ud[1] * (error_ud - pError_ud)
-    ud = int(np.clip(ud, -100, 100))
-
-    tello.send_rc_control(0, fb, ud, speed)
-    print("----------------")
-    print("Up-Down:", ud)
-    print("Yaw", speed)
-
-    return error_yaw, error_ud
-    
