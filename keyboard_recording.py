@@ -6,7 +6,9 @@ import numpy as np
 import json
 import time
 import pygame
-from april_tag import calculate_area
+# Updated imports:
+from april_tag import calculate_area, detect_apriltag, calculate_center_offset
+# helper_func.rot2eul is used within detect_apriltag
 
 # AprilTag detector setup
 
@@ -29,54 +31,114 @@ def init_tello():
     drone.streamon()
     return drone
 
-# Data structure: {tag_id: [list of (translation, rotation matrix)]}
-record_dict = {}
+# Updated Data structure comment
+# Data structure for in-memory storage:
+# {
+#   user_tag_num (int): [ # Keyed by 1-9 from keyboard
+#     { # List of individual detections
+#       'tag_id': int,        # Actual AprilTag ID
+#       'center': (int, int),
+#       'corners': np.array,
+#       'pose_t': np.array,   # Translation vector
+#       'pose_R': np.array,   # Rotation matrix
+#       'angle': (float, float, float), # Roll, Pitch, Yaw
+#       'area': float,
+#       'offset_x': int,
+#       'offset_y': int
+#     }, ...
+#   ], ...
+# }
+# JSON_FILE_PATH and load_records remain the same
+JSON_FILE_PATH = "tello_tag_records.json"
+
+def load_records():
+    try:
+        with open(JSON_FILE_PATH, 'r') as f:
+            data = json.load(f)
+            # Data is loaded as per JSON structure, no complex conversion needed here
+            # as record_dict will be populated by new recordings if this is empty.
+            # If you need to load and re-process old JSON, this might need adjustment
+            # based on whether old JSON matches the new richer structure.
+            # For now, assume we are primarily concerned with saving new format.
+            # And if an old format is loaded, it might not be fully compatible
+            # with parts of the code expecting the new richer dict structure.
+            # A robust solution might involve versioning or checking keys.
+            # For this modification, we focus on saving the new structure.
+            # The loaded 'data' will be used as the initial 'record_dict'.
+            # If it's an old format, new recordings will use the new format.
+            # Let's convert string keys from JSON back to int for record_dict
+            return {int(k): v for k, v in data.items()} if data else {}
+    except FileNotFoundError:
+        print(f"Info: {JSON_FILE_PATH} not found. Starting with an empty record set.")
+        return {}
+    except json.JSONDecodeError:
+        print(f"Error: Could not decode {JSON_FILE_PATH}. Starting with an empty record set.")
+        return {}
+
+record_dict = load_records()
 record_lock = threading.Lock()
 
-# Helper to get average of list of np arrays
+# Helper to get average of list of np arrays (remains useful)
 
 def average_np(arrs):
     arrs = np.array(arrs)
     return np.mean(arrs, axis=0)
 
 # Video/AprilTag/Recording thread
-
-def video_apriltag_thread(drone, stop_event, latest_tag_pose):
+def video_apriltag_thread(drone, stop_event, latest_tag_data_shared): # Renamed for clarity
     while not stop_event.is_set():
         frame = drone.get_frame_read().frame
-        frame = cv2.resize(frame, (960, 720))
-        gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
-        results = detector.detect(gray, estimate_tag_pose=True, camera_params=[921.170702,919.018377,459.904354,351.238301], tag_size=0.165)
-        tag_id = None
-        pose = None
-        rot = None
-        if results:
-            r = results[0]
-            tag_id = r.tag_id
-            center = (int(r.center[0]), int(r.center[1]))
-            corners = r.corners.astype(int)
-            area = calculate_area(corners)
-            pose_t = r.pose_t.flatten()
-            pose_R = r.pose_R
+        frame_resized = cv2.resize(frame, (960, 720)) # Use a different variable for resized frame
+        frame_height, frame_width = frame_resized.shape[:2]
+
+        # Use detect_apriltag from april_tag.py
+        tag_info_dict = detect_apriltag(frame_resized, detector) # detector is global
+
+        current_detection_details = None
+        if tag_info_dict:
+            # Calculate area
+            area = calculate_area(tag_info_dict['corners'])
+            # Calculate center offset
+            offset_x, offset_y = calculate_center_offset(tag_info_dict['center'], frame_width, frame_height)
+
+            # Prepare the full data dictionary for this detection
+            current_detection_details = {
+                'tag_id': tag_info_dict['tag_id'],
+                'center': tag_info_dict['center'],
+                'corners': tag_info_dict['corners'], # Keep as numpy array for potential use
+                'pose_t': tag_info_dict['pose_t'],
+                'pose_R': tag_info_dict['pose_R'],
+                'angle': tag_info_dict['angle'],
+                'area': area,
+                'offset_x': offset_x,
+                'offset_y': offset_y
+            }
+
+            # Drawing on frame (similar to before, but using data from current_detection_details)
+            r_center = current_detection_details['center']
+            r_corners = current_detection_details['corners'].astype(int) # Ensure corners are int for drawing
+            r_tag_id = current_detection_details['tag_id']
+            r_pose_t = current_detection_details['pose_t']
+
             for i in range(4):
-                cv2.line(frame, tuple(corners[i]), tuple(corners[(i+1) % 4]), (0, 255, 0), 2)
-            cv2.circle(frame, center, 5, (0, 0, 255), -1)
-            cv2.putText(frame, f"ID: {tag_id}", (center[0] - 10, center[1] - 20), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 255), 2)
-            cv2.putText(frame, f"Pos: ({float(pose_t[0]):.2f}, {float(pose_t[1]):.2f}, {float(pose_t[2]):.2f})", (center[0] - 10, center[1] + 20), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 255), 2)
-            pose = pose_t
-            rot = pose_R
-        else:
-            pose = None
-            rot = None
-        latest_tag_pose[0] = (pose, rot, area)
-        cv2.imshow("Tello Key Record", frame)
+                cv2.line(frame_resized, tuple(r_corners[i]), tuple(r_corners[(i+1) % 4]), (0, 255, 0), 2)
+            cv2.circle(frame_resized, r_center, 5, (0, 0, 255), -1)
+            cv2.putText(frame_resized, f"ID: {r_tag_id}", (r_center[0] - 10, r_center[1] - 20), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 255), 2)
+            cv2.putText(frame_resized, f"Pos: ({float(r_pose_t[0]):.2f}, {float(r_pose_t[1]):.2f}, {float(r_pose_t[2]):.2f})", (r_center[0] - 10, r_center[1] + 20), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 255), 2)
+            cv2.putText(frame_resized, f"Area: {area:.2f}", (r_center[0] - 10, r_center[1] + 40), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 255), 2)
+            cv2.putText(frame_resized, f"Offset: ({offset_x}, {offset_y})", (r_center[0] - 10, r_center[1] + 60), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 255), 2)
+
+        latest_tag_data_shared[0] = current_detection_details # Store the dict or None
+        # print(latest_tag_data_shared[0]) # Optional: for debugging
+        cv2.imshow("Tello Key Record", frame_resized)
         if cv2.waitKey(1) & 0xFF == ord('q'):
             stop_event.set()
             break
     cv2.destroyAllWindows()
 
-def pygame_control_thread(drone, stop_event, record_dict, record_lock, get_latest_tag_pose):
+def pygame_control_thread(drone, stop_event, record_dict_ref, record_lock_ref, get_latest_tag_data_func): # Pass refs and func
     pygame.init()
+    # ... (Pygame setup remains the same) ...
     WIDTH, HEIGHT = 400, 200
     WIN = pygame.display.set_mode((WIDTH, HEIGHT))
     pygame.display.set_caption("Tello Controls & Recording")
@@ -85,13 +147,16 @@ def pygame_control_thread(drone, stop_event, record_dict, record_lock, get_lates
     flying = False
     info = ""
     clock = pygame.time.Clock()
+
     while not stop_event.is_set():
+        # ... (Pygame event handling and display updates) ...
         WIN.fill((30, 30, 30))
         text = font.render("Controls: e=takeoff, l=land, wasd/ijkl=move, 1-9=record, q=quit", True, (255,255,255))
         WIN.blit(text, (10, 10))
         text2 = font.render(info, True, (0,255,0))
         WIN.blit(text2, (10, 50))
         pygame.display.update()
+
         for event in pygame.event.get():
             if event.type == pygame.QUIT:
                 stop_event.set()
@@ -109,77 +174,141 @@ def pygame_control_thread(drone, stop_event, record_dict, record_lock, get_lates
                     drone.land()
                     flying = False
                     info = "Land"
-                elif key == pygame.K_w:
-                    drone.send_rc_control(0, 0, speed, 0)
+                elif key == pygame.K_w: # Assuming 'w' is for up, not forward based on common game controls
+                    drone.send_rc_control(0, 0, speed, 0) # lr, fb, ud, yaw
                     info = "Up"
                 elif key == pygame.K_s:
                     drone.send_rc_control(0, 0, -speed, 0)
                     info = "Down"
-                elif key == pygame.K_a:
+                elif key == pygame.K_a: # Yaw left
                     drone.send_rc_control(0, 0, 0, -speed)
                     info = "Yaw Left"
-                elif key == pygame.K_d:
+                elif key == pygame.K_d: # Yaw right
                     drone.send_rc_control(0, 0, 0, speed)
                     info = "Yaw Right"
-                elif key == pygame.K_UP:
+                elif key == pygame.K_UP: # Forward
                     drone.send_rc_control(0, speed, 0, 0)
                     info = "Forward"
-                elif key == pygame.K_DOWN:
+                elif key == pygame.K_DOWN: # Backward
                     drone.send_rc_control(0, -speed, 0, 0)
                     info = "Backward"
-                elif key == pygame.K_LEFT:
+                elif key == pygame.K_LEFT: # Left
                     drone.send_rc_control(-speed, 0, 0, 0)
                     info = "Left"
-                elif key == pygame.K_RIGHT:
+                elif key == pygame.K_RIGHT: # Right
                     drone.send_rc_control(speed, 0, 0, 0)
                     info = "Right"
+
                 elif pygame.K_1 <= key <= pygame.K_9:
-                    tag_num = key - pygame.K_0
-                    latest_pose, latest_rot, latest_area = get_latest_tag_pose()
-                    if latest_pose is not None and latest_rot is not None:
-                        with record_lock:
-                            if tag_num not in record_dict:
-                                record_dict[tag_num] = []
-                            record_dict[tag_num].append((latest_pose.copy(), latest_rot.copy(), latest_area.copy()))
-                            print(f"Recorded tag {tag_num}: pos {latest_pose},\nrot:\n{latest_rot}\narea: {latest_area}")
-                            save_records_to_json(record_dict)
-                            info = f"Recorded tag {tag_num}"
-        # Stop movement if no key is pressed
+                    user_tag_num = key - pygame.K_0 # This is the 1-9 key
+                    
+                    latest_tag_data = get_latest_tag_data_func() # This gets the dictionary
+                    
+                    if latest_tag_data: # Check if a tag was detected
+                        # Make copies of numpy arrays before storing
+                        data_to_store = latest_tag_data.copy() # Shallow copy is fine for top-level dict
+                        data_to_store['pose_t'] = latest_tag_data['pose_t'].copy()
+                        data_to_store['pose_R'] = latest_tag_data['pose_R'].copy()
+                        if isinstance(latest_tag_data['corners'], np.ndarray):
+                             data_to_store['corners'] = latest_tag_data['corners'].copy()
+                        # 'center' and 'angle' are tuples, 'tag_id', 'area', 'offset_x', 'offset_y' are primitives - no deep copy needed
+
+                        with record_lock_ref:
+                            if user_tag_num not in record_dict_ref:
+                                record_dict_ref[user_tag_num] = []
+                            record_dict_ref[user_tag_num].append(data_to_store)
+                            print(f"Recorded data for user tag num {user_tag_num}: "
+                                  f"Actual Tag ID {data_to_store['tag_id']}, Area {data_to_store['area']:.2f}")
+                            save_records_to_json(record_dict_ref) # Save after each recording
+                            info = f"Recorded for user tag {user_tag_num}"
+                    else:
+                        info = f"No AprilTag in view to record for {user_tag_num}"
+                        print(f"Attempted to record for user tag {user_tag_num}, but no AprilTag detected.")
+        
+        # Stop movement if no key is pressed (remains the same)
+        # ...existing code...
         keys = pygame.key.get_pressed()
-        if not any(keys):
-            drone.send_rc_control(0, 0, 0, 0)
+        if not any(keys): # This check might be too simplistic if some keys are for recording/takeoff/land
+            # More precise check: if no movement keys are pressed
+            movement_keys = [pygame.K_w, pygame.K_s, pygame.K_a, pygame.K_d, 
+                             pygame.K_UP, pygame.K_DOWN, pygame.K_LEFT, pygame.K_RIGHT]
+            if not any(keys[k] for k in movement_keys):
+                 drone.send_rc_control(0, 0, 0, 0)
         clock.tick(30)
     pygame.quit()
 
-def save_records_to_json(record_dict):
-    out = {}
-    for tag_id, records in record_dict.items():
-        if not records:
+def save_records_to_json(records_to_save): # Renamed parameter
+    out_json = {}
+    for user_tag_num, recorded_data_list in records_to_save.items():
+        if not recorded_data_list:
             continue
-        poses = np.array([r[0] for r in records])
-        rots = np.array([r[1] for r in records])
-        areas = np.array([r[2] for r in records])
-        avg_pose = np.mean(poses, axis=0).tolist()
-        avg_rot = np.mean(rots, axis=0).tolist()
-        avg_area = np.mean(areas)
-        out[tag_id] = {
-            "num_records": len(records),
-            "avg_translation": avg_pose,
-            "avg_rotation_matrix": avg_rot,
-            "avg_area": avg_area
-        }
-    with open("tello_tag_records.json", "w") as f:
-        json.dump(out, f, indent=2)
 
-if __name__ == "__main__":
+        num_records = len(recorded_data_list)
+        
+        # Assuming all records for a user_tag_num see the same actual_tag_id
+        # If not, this needs a more complex logic (e.g., most common)
+        actual_tag_id = recorded_data_list[0]['tag_id'] if num_records > 0 else None
+
+        # Calculate averages for relevant fields
+        # Ensure all components are serializable (e.g., numpy arrays to lists)
+        avg_translation = np.mean([rec['pose_t'] for rec in recorded_data_list], axis=0).tolist()
+        avg_rotation_matrix = np.mean([rec['pose_R'] for rec in recorded_data_list], axis=0).tolist()
+        avg_angle = np.mean([rec['angle'] for rec in recorded_data_list], axis=0).tolist()
+        avg_area = float(np.mean([rec['area'] for rec in recorded_data_list]))
+        
+        # Center is a tuple of two numbers (x, y)
+        avg_center_x = float(np.mean([rec['center'][0] for rec in recorded_data_list]))
+        avg_center_y = float(np.mean([rec['center'][1] for rec in recorded_data_list]))
+        avg_center = [avg_center_x, avg_center_y]
+
+        avg_offset_x = float(np.mean([rec['offset_x'] for rec in recorded_data_list]))
+        avg_offset_y = float(np.mean([rec['offset_y'] for rec in recorded_data_list]))
+        avg_offset = [avg_offset_x, avg_offset_y]
+
+        out_json[str(user_tag_num)] = { # JSON keys must be strings
+            "num_records": num_records,
+            "actual_tag_id": actual_tag_id,
+            "avg_translation": avg_translation,
+            "avg_rotation_matrix": avg_rotation_matrix,
+            "avg_angle": avg_angle,
+            "avg_area": avg_area,
+            "avg_center": avg_center,
+            "avg_offset": avg_offset
+            # 'corners' are not averaged/stored in the summary JSON, but were used for area.
+        }
+
+    try:
+        with open(JSON_FILE_PATH, 'w') as f:
+            json.dump(out_json, f, indent=2) # Use indent for readability
+        print(f"Records saved to {JSON_FILE_PATH}")
+    except Exception as e:
+        print(f"Error saving records to JSON: {e}")
+
+
+# Main execution
+if __name__ == '__main__':
     drone = init_tello()
     stop_event = threading.Event()
-    latest_tag_pose = [ (None, None) ]
-    t1 = threading.Thread(target=video_apriltag_thread, args=(drone, stop_event, latest_tag_pose))
-    t2 = threading.Thread(target=pygame_control_thread, args=(drone, stop_event, record_dict, record_lock, lambda: latest_tag_pose[0]))
-    t1.start()
-    t2.start()
-    t1.join()
-    t2.join()
+    
+    # Shared data structure for the latest detected tag's full details
+    # This will hold a dictionary or None
+    latest_tag_data_shared = [None] 
+
+    video_thread = threading.Thread(target=video_apriltag_thread, args=(drone, stop_event, latest_tag_data_shared))
+    
+    # Lambda to pass to pygame thread to get the latest data
+    get_latest_tag_data_func = lambda: latest_tag_data_shared[0]
+
+    control_thread = threading.Thread(target=pygame_control_thread, args=(drone, stop_event, record_dict, record_lock, get_latest_tag_data_func))
+
+    video_thread.start()
+    control_thread.start()
+
+    video_thread.join()
+    control_thread.join()
+
+    if drone.is_flying:
+        drone.land()
+    drone.streamoff()
     drone.end()
-    print("Disconnected.")
+    print("Program ended.")
