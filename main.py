@@ -7,6 +7,7 @@ from pupil_apriltags import Detector
 import numpy as np
 from movement_func import *
 from april_tag import *
+from helper_func import *
 
 detector = Detector(
     families="tag36h11",
@@ -98,15 +99,7 @@ if __name__ == "__main__":
 
         if drone_took_off and not tag1:
             if tag_info:
-                # Move towards the tag
-                angle_threshold = 0.20
-                center_error_x = pose_t[0]  # meters, left/right translation
-                center_error_y = pose_t[1]  # meters, up/down translation
-                center_threshold = 0.10  # meters (10cm)
-                z_target = 3  # meters
-                z_error = pose_t[2] - z_target
-                # Check alignment
-                
+
                 pError_yaw, pError_ud = track_apriltag(
                     tello, area, 
                     offset_x, offset_y, 
