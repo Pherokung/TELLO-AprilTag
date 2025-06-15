@@ -21,8 +21,8 @@ detector = Detector(
 )
 
 # Target parameters
-TARGET_AREA = 30000  # Target pixel area for the AprilTag
-CENTER_THRESHOLD = 50  # How close to center we want to be (in pixels)
+TARGET_AREA = 2566  # Target pixel area for the AprilTag
+CENTER_THRESHOLD = 20  # How close to center we want to be (in pixels)
 
 # PID controller constants (tune these as needed)
 KP_AREA = 0.1  # Forward/backward control
@@ -52,6 +52,8 @@ if __name__ == "__main__":
     
     tello = init_tello()
     print("Tello initialized and ready. Streaming video...")
+
+    counter_1 = 0
 
     while True:
 
@@ -109,23 +111,38 @@ if __name__ == "__main__":
                 z_error = pose_t[2] - z_target
                 # Check alignment
                 
-                if not is_tracking_done(area, TARGET_AREA, pError_yaw, pError_ud):
-                    pError_yaw, pError_ud = track_apriltag(
-                        tello, area, 
-                        offset_x, offset_y, 
-                        pError_yaw, pError_ud,
-                        TARGET_AREA
-                        )
-                    tag1 = 1
-                elif not is_aligning_done(angle, 0.2):
-                    aligning_angle(tello, angle, 0.2)
-                    tag1 = 2
+                if tag1 != 4:   
+                    if not is_tracking_done(area, TARGET_AREA, pError_yaw, pError_ud):
+                        print("Tag 1: Not tracked")
+                        pError_yaw, pError_ud = track_apriltag(
+                            tello, area, 
+                            offset_x, offset_y, 
+                            pError_yaw, pError_ud,
+                            TARGET_AREA
+                            )
+                        tag1 = 1
+                    elif not is_aligning_done(angle, 0.2):
+                        print("Tag 1: Not aligned")
+                        aligning_angle(tello, angle, 0.2)
+                        tag1 = 2
+                    else:
+                        print(f"Tag 1: In Position for {counter_1}!")
+                        counter_1 += 1
+                        if counter_1 >= 60:
+                            tag1 = 4
+                        else:
+                            tag1 = 3
+                        tello.send_rc_control(0, 0, 0, 0)
                 else:
-                    tello.send_rc_control(0, 0, 0, 0)
-                    tag1 = 3
+                    move_tello(tello, "forward", 200, 30)
+                    compound_move_tello(tello, "up", 80, "forward", 150, 30)
+                    curve_tello(tello, 75, 75, 0, 150, 0, 0, 30)
+                    curve_tello(tello, 75, -75, 0, 150, 0, 0, 30)
+                    break
             else:
                 tello.send_rc_control(0, 0, 0, 0)
+                # tello.land()
 
-
+    tello.land()
     cv2.destroyAllWindows()
     tello.end()
