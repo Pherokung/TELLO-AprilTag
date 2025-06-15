@@ -75,7 +75,7 @@ def load_records():
         print(f"Error: Could not decode {JSON_FILE_PATH}. Starting with an empty record set.")
         return {}
 
-record_dict = load_records()
+record_dict = load_records() # Restore loading of records
 record_lock = threading.Lock()
 
 # Helper to get average of list of np arrays (remains useful)
@@ -214,7 +214,9 @@ def pygame_control_thread(drone, stop_event, record_dict_ref, record_lock_ref, g
                         # 'center' and 'angle' are tuples, 'tag_id', 'area', 'offset_x', 'offset_y' are primitives - no deep copy needed
 
                         with record_lock_ref:
-                            if user_tag_num not in record_dict_ref:
+                            # If the current entry for user_tag_num is not a list (e.g., it's a loaded summary dict),
+                            # or if the key doesn't exist, initialize it as a new list for raw data.
+                            if user_tag_num not in record_dict_ref or not isinstance(record_dict_ref[user_tag_num], list):
                                 record_dict_ref[user_tag_num] = []
                             record_dict_ref[user_tag_num].append(data_to_store)
                             print(f"Recorded data for user tag num {user_tag_num}: "
@@ -239,44 +241,52 @@ def pygame_control_thread(drone, stop_event, record_dict_ref, record_lock_ref, g
 
 def save_records_to_json(records_to_save): # Renamed parameter
     out_json = {}
-    for user_tag_num, recorded_data_list in records_to_save.items():
-        if not recorded_data_list:
+    for user_tag_num_key, data_for_tag in records_to_save.items(): # user_tag_num_key is int from record_dict
+        user_tag_num_str = str(user_tag_num_key) # JSON keys must be strings
+
+        if isinstance(data_for_tag, list): # This is raw data recorded (or re-recorded) in this session
+            recorded_data_list = data_for_tag
+            if not recorded_data_list: # Should not happen if we append, but good check
+                print(f"Info: No raw data to save for user tag {user_tag_num_str}.")
+                continue
+
+            num_records = len(recorded_data_list)
+            # All items in recorded_data_list are expected to be dicts with 'tag_id' etc.
+            actual_tag_id = recorded_data_list[0]['tag_id']
+
+            avg_translation = np.mean([rec['pose_t'] for rec in recorded_data_list], axis=0).tolist()
+            avg_rotation_matrix = np.mean([rec['pose_R'] for rec in recorded_data_list], axis=0).tolist()
+            avg_angle = np.mean([rec['angle'] for rec in recorded_data_list], axis=0).tolist()
+            avg_area = float(np.mean([rec['area'] for rec in recorded_data_list]))
+            
+            avg_center_x = float(np.mean([rec['center'][0] for rec in recorded_data_list]))
+            avg_center_y = float(np.mean([rec['center'][1] for rec in recorded_data_list]))
+            avg_center = [avg_center_x, avg_center_y]
+
+            avg_offset_x = float(np.mean([rec['offset_x'] for rec in recorded_data_list]))
+            avg_offset_y = float(np.mean([rec['offset_y'] for rec in recorded_data_list]))
+            avg_offset = [avg_offset_x, avg_offset_y]
+
+            out_json[user_tag_num_str] = {
+                "num_records": num_records,
+                "actual_tag_id": actual_tag_id,
+                "avg_translation": avg_translation,
+                "avg_rotation_matrix": avg_rotation_matrix,
+                "avg_angle": avg_angle,
+                "avg_area": avg_area,
+                "avg_center": avg_center,
+                "avg_offset": avg_offset
+            }
+        elif isinstance(data_for_tag, dict): # This is a summary loaded and not touched in this session
+            # Pass through the existing summary dictionary.
+            # Ensure all its values are JSON serializable if they weren't already.
+            # (load_records should handle this if JSON was valid)
+            out_json[user_tag_num_str] = data_for_tag
+            print(f"Info: Passing through existing summary for user tag {user_tag_num_str}.")
+        else:
+            print(f"Warning: Unexpected data type for user tag {user_tag_num_str} in save_records_to_json. Skipping.")
             continue
-
-        num_records = len(recorded_data_list)
-        
-        # Assuming all records for a user_tag_num see the same actual_tag_id
-        # If not, this needs a more complex logic (e.g., most common)
-        actual_tag_id = recorded_data_list[0]['tag_id'] if num_records > 0 else None
-
-        # Calculate averages for relevant fields
-        # Ensure all components are serializable (e.g., numpy arrays to lists)
-        avg_translation = np.mean([rec['pose_t'] for rec in recorded_data_list], axis=0).tolist()
-        avg_rotation_matrix = np.mean([rec['pose_R'] for rec in recorded_data_list], axis=0).tolist()
-        avg_angle = np.mean([rec['angle'] for rec in recorded_data_list], axis=0).tolist()
-        avg_area = float(np.mean([rec['area'] for rec in recorded_data_list]))
-        
-        # Center is a tuple of two numbers (x, y)
-        avg_center_x = float(np.mean([rec['center'][0] for rec in recorded_data_list]))
-        avg_center_y = float(np.mean([rec['center'][1] for rec in recorded_data_list]))
-        avg_center = [avg_center_x, avg_center_y]
-
-        avg_offset_x = float(np.mean([rec['offset_x'] for rec in recorded_data_list]))
-        avg_offset_y = float(np.mean([rec['offset_y'] for rec in recorded_data_list]))
-        avg_offset = [avg_offset_x, avg_offset_y]
-
-        out_json[str(user_tag_num)] = { # JSON keys must be strings
-            "num_records": num_records,
-            "actual_tag_id": actual_tag_id,
-            "avg_translation": avg_translation,
-            "avg_rotation_matrix": avg_rotation_matrix,
-            "avg_angle": avg_angle,
-            "avg_area": avg_area,
-            "avg_center": avg_center,
-            "avg_offset": avg_offset
-            # 'corners' are not averaged/stored in the summary JSON, but were used for area.
-        }
-
+            
     try:
         with open(JSON_FILE_PATH, 'w') as f:
             json.dump(out_json, f, indent=2) # Use indent for readability
