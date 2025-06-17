@@ -35,7 +35,7 @@ def detect_apriltag(frame, detector):
         gray,
         estimate_tag_pose=True,
         camera_params=[921.170702, 919.018377, 459.904354, 351.238301],
-        tag_size=0.165
+        tag_size=0.092
     )
     if results:
         r = results[0]
