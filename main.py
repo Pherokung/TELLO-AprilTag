@@ -136,8 +136,8 @@ if __name__ == "__main__":
                 else:
                     move_tello(tello, "forward", 200, 30)
                     compound_move_tello(tello, "up", 80, "forward", 150, 30)
-                    curve_tello(tello, 75, 75, 0, 150, 0, 0, 30)
                     curve_tello(tello, 75, -75, 0, 150, 0, 0, 30)
+                    curve_tello(tello, 75, 75, 0, 150, 0, 0, 30)
                     break
             else:
                 tello.send_rc_control(0, 0, 0, 0)
