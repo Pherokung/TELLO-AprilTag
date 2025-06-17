@@ -50,37 +50,19 @@ if __name__ == "__main__":
         frame = cv2.resize(frame, (960, 720))
         frame_height, frame_width = frame.shape[:2]
 
-        tag_info_raw = detect_apriltag(frame, detector)
+        detected_tags = detect_apriltag(frame, detector) # This now returns a list of dicts or an empty list
         
-        # Prepare tag_info for master function
-        processed_tag_info = None
-        if tag_info_raw:
-            processed_tag_info = tag_info_raw.copy()
-            # Ensure 'corners' key exists before calculating area
-            if 'corners' in processed_tag_info:
-                processed_tag_info['area'] = calculate_area(processed_tag_info['corners'])
-            else:
-                # If no corners, area cannot be calculated, tag_info might be incomplete
-                processed_tag_info['area'] = 0 # Or handle as an error/incomplete detection
+        # Prepare tag_info for master function (assuming we focus on the first detected tag)
+        # The master function expects a single tag_info dictionary or None
+        processed_tag_info = None 
+        if detected_tags: # If any tags were detected
+            # For simplicity, let's use the first detected tag for drawing and control
+            # In a multi-tag scenario, you might select a specific tag_id or the largest tag
+            processed_tag_info = detected_tags[0] # TODO
 
-            # Display info from raw detection data
-            center = tag_info_raw['center']
-            corners = tag_info_raw['corners']
-            angle = tag_info_raw.get('angle', [0,0,0]) # Use .get for safer access
-            pose_t = tag_info_raw.get('pose_t', [0,0,0])
-            tag_id = tag_info_raw.get('tag_id', -1)
-            area_display = processed_tag_info.get('area', 0)
-
-            offset_x_display, offset_y_display = calculate_center_offset(center, frame_width, frame_height)
-
-            for i in range(4):
-                cv2.line(frame, tuple(corners[i]), tuple(corners[(i + 1) % 4]), (0, 255, 0), 2)
-            cv2.circle(frame, center, 5, (0, 0, 255), -1)
-            cv2.putText(frame, f"ID: {tag_id}", (center[0] - 10, center[1] - 20), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 255), 2)
-            cv2.putText(frame, f"Area: {area_display:.0f} (Tgt: {TARGET_AREA})", (center[0] - 10, center[1] + 20), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 255), 2)
-            cv2.putText(frame, f"Angle(yaw): {angle[1]:.2f} rad", (center[0] - 10, center[1] + 40), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 255), 2)
-            cv2.putText(frame, f"Pose t: ({pose_t[0]:.2f}, {pose_t[1]:.2f}, {pose_t[2]:.2f})m", (center[0] - 10, center[1] + 60), cv2.FONT_HERSHEY_SIMPLEX, 0.4, (0,0,255),2)
-            cv2.putText(frame, f"CamOffsetPx: ({offset_x_display:.0f},{offset_y_display:.0f}) TgtOffsetPx: ({TARGET_X_OFFSET_PX},{TARGET_Y_OFFSET_PX})", (center[0] - 10, center[1] + 80), cv2.FONT_HERSHEY_SIMPLEX, 0.4, (0,0,255),2)
+            # Call the drawing function with the selected tag's data
+            for tag in detected_tags:
+                draw_apriltag_info(frame, tag, frame_width, frame_height, TARGET_X_OFFSET_PX, TARGET_Y_OFFSET_PX, TARGET_AREA)
 
         # Update display text based on current state
         current_state_text = f"State: {tag1_state} ({state_description.get(tag1_state, 'Unknown')})"
