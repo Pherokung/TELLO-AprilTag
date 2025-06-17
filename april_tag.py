@@ -63,9 +63,10 @@ def detect_apriltag(frame, detector):
     print("Tags: ", processed_tags)
     return processed_tags # Return the list of processed dictionaries
 
-def draw_apriltag_info(frame, tag_data, frame_width, frame_height, target_x_offset_px, target_y_offset_px, target_area):
+def draw_apriltag_info(frame, tag_data, frame_width, frame_height, target_x_offset_px=None, target_y_offset_px=None, target_area=None):
     """Draws AprilTag detection information on the frame."""
     if not tag_data:
+        print("No tags to draw")
         return
 
     center = tag_data['center'] # tuple of ints
@@ -77,11 +78,21 @@ def draw_apriltag_info(frame, tag_data, frame_width, frame_height, target_x_offs
 
     offset_x_display, offset_y_display = calculate_center_offset(center, frame_width, frame_height)
 
+    print(f"Drawing Tag {tag_id}")
+
     for i in range(4):
         cv2.line(frame, tuple(corners[i]), tuple(corners[(i + 1) % 4]), (0, 255, 0), 2)
     cv2.circle(frame, center, 5, (0, 0, 255), -1)
     cv2.putText(frame, f"ID: {tag_id}", (center[0] - 10, center[1] - 20), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 255), 2)
-    cv2.putText(frame, f"Area: {area_display:.0f} (Tgt: {target_area})", (center[0] - 10, center[1] + 20), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 255), 2)
+    if target_area:
+        cv2.putText(frame, f"Area: {area_display:.0f} (Tgt: {target_area})", (center[0] - 10, center[1] + 20), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 255), 2)
+    else:
+        cv2.putText(frame, f"Area: {area_display:.0f}", (center[0] - 10, center[1] + 20), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 255), 2)
     cv2.putText(frame, f"Angle(yaw): {angle[1]:.2f} rad", (center[0] - 10, center[1] + 40), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 255), 2)
     cv2.putText(frame, f"Pose t: ({pose_t[0]:.2f}, {pose_t[1]:.2f}, {pose_t[2]:.2f})m", (center[0] - 10, center[1] + 60), cv2.FONT_HERSHEY_SIMPLEX, 0.4, (0,0,255),2)
-    cv2.putText(frame, f"CamOffsetPx: ({offset_x_display:.0f},{offset_y_display:.0f}) TgtOffsetPx: ({target_x_offset_px},{target_y_offset_px})", (center[0] - 10, center[1] + 80), cv2.FONT_HERSHEY_SIMPLEX, 0.4, (0,0,255),2)
+    if target_x_offset_px:
+        cv2.putText(frame, f"CamOffsetPx: ({offset_x_display:.0f},{offset_y_display:.0f}) TgtOffsetPx: ({target_x_offset_px},{target_y_offset_px})", (center[0] - 10, center[1] + 80), cv2.FONT_HERSHEY_SIMPLEX, 0.4, (0,0,255),2)
+    else:
+        cv2.putText(frame, f"CamOffsetPx: ({offset_x_display:.0f},{offset_y_display:.0f})", (center[0] - 10, center[1] + 80), cv2.FONT_HERSHEY_SIMPLEX, 0.4, (0,0,255),2)
+
+    return frame
