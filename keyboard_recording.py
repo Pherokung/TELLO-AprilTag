@@ -7,7 +7,7 @@ import json
 import time
 import pygame
 # Updated imports:
-from april_tag import *
+from april_tag import detect_apriltag, calculate_center_offset, calculate_area # Explicitly import
 # helper_func.rot2eul is used within detect_apriltag
 
 # AprilTag detector setup
@@ -32,41 +32,59 @@ def init_tello():
     return drone
 
 # Updated Data structure comment
-# Data structure for in-memory storage:
+# In-memory storage: record_dict
 # {
-#   user_tag_num (int): [ # Keyed by 1-9 from keyboard
-#     { # List of individual detections
-#       'tag_id': int,        # Actual AprilTag ID
-#       'center': (int, int),
-#       'corners': np.array,
-#       'pose_t': np.array,   # Translation vector
-#       'pose_R': np.array,   # Rotation matrix
-#       'angle': (float, float, float), # Roll, Pitch, Yaw
-#       'area': float,
-#       'offset_x': int,
-#       'offset_y': int
-#     }, ...
-#   ], ...
+#   user_tag_num (int, e.g., 1-9 from keyboard): {
+#     actual_tag_id (int, e.g., 5): [ # List of individual detections for this specific AprilTag ID
+#       {
+#         'tag_id': int,
+#         'center': (int, int),
+#         'corners': np.array, # Shape (4, 2)
+#         'pose_t': np.array,  # Translation vector (3,)
+#         'pose_R': np.array,  # Rotation matrix (3, 3)
+#         'angle': (float, float, float), # Roll, Pitch, Yaw
+#         'area': float,
+#         'offset_x': int,     # Offset from frame center X
+#         'offset_y': int      # Offset from frame center Y
+#       },
+#       ... # more detections for this actual_tag_id under this user_tag_num
+#     ],
+#     actual_tag_id_2 (int, e.g., 8): [ ... ],
+#     ... # more actual AprilTag IDs detected when user_tag_num was pressed
+#   },
+#   user_tag_num_2 (int): { ... },
+#   ...
 # }
-# JSON_FILE_PATH and load_records remain the same
+
+# JSON file structure (tello_tag_records.json):
+# {
+#   "user_tag_num_str" (e.g., "1"): {
+#     "actual_tag_id_str" (e.g., "5"): {
+#       "num_records": int,
+#       "avg_translation": [float, float, float],
+#       "avg_rotation_matrix": [[float,...],[...],[...]],
+#       "avg_angle": [float, float, float],
+#       "avg_area": float,
+#       "avg_center": [float, float], # Averaged (x, y)
+#       "avg_offset": [float, float]  # Averaged (offset_x, offset_y)
+#     },
+#     "actual_tag_id_str_2" (e.g., "8"): { ... },
+#     ...
+#   },
+#   "user_tag_num_str_2": { ... },
+#   ...
+# }
 JSON_FILE_PATH = "tello_tag_records.json"
 
 def load_records():
     try:
         with open(JSON_FILE_PATH, 'r') as f:
             data = json.load(f)
-            # Data is loaded as per JSON structure, no complex conversion needed here
-            # as record_dict will be populated by new recordings if this is empty.
-            # If you need to load and re-process old JSON, this might need adjustment
-            # based on whether old JSON matches the new richer structure.
-            # For now, assume we are primarily concerned with saving new format.
-            # And if an old format is loaded, it might not be fully compatible
-            # with parts of the code expecting the new richer dict structure.
-            # A robust solution might involve versioning or checking keys.
-            # For this modification, we focus on saving the new structure.
-            # The loaded 'data' will be used as the initial 'record_dict'.
-            # If it's an old format, new recordings will use the new format.
-            # Let's convert string keys from JSON back to int for record_dict
+            # Convert top-level keys (user_tag_num) to int.
+            # The inner structure (actual_tag_id summaries) remains as loaded.
+            # This loaded data is primarily for reference or if no new recordings are made
+            # for a specific user_tag_num. If new recordings happen, they'll use the
+            # detailed list-of-detections format in memory.
             return {int(k): v for k, v in data.items()} if data else {}
     except FileNotFoundError:
         print(f"Info: {JSON_FILE_PATH} not found. Starting with an empty record set.")
@@ -85,56 +103,52 @@ def average_np(arrs):
     return np.mean(arrs, axis=0)
 
 # Video/AprilTag/Recording thread
-def video_apriltag_thread(drone, stop_event, latest_tag_data_shared): # Renamed for clarity
+def video_apriltag_thread(drone, stop_event, latest_tag_data_shared):
     while not stop_event.is_set():
         frame = drone.get_frame_read().frame
-        frame_resized = cv2.resize(frame, (960, 720)) # Use a different variable for resized frame
+        if frame is None:
+            time.sleep(0.01) # Wait if frame is not available
+            continue
+            
+        frame_resized = cv2.resize(frame, (960, 720))
         frame_height, frame_width = frame_resized.shape[:2]
 
-        # Use detect_apriltag from april_tag.py
-        tags = detect_apriltag(frame_resized, detector) # detector is global
-        if tags:
-            for tag in tags:
-                frame_resized = draw_apriltag_info(frame_resized, tag, frame_width, frame_height)
+        # detect_apriltag returns a list of dictionaries, each with 'area' already calculated
+        detected_tags_current_frame = detect_apriltag(frame_resized, detector)
+        
+        processed_tags_for_sharing = []
+        if detected_tags_current_frame:
+            for tag_data in detected_tags_current_frame:
+                # Calculate center offset for this tag
+                offset_x, offset_y = calculate_center_offset(tag_data['center'], frame_width, frame_height)
+                
+                # Add offsets to the tag's dictionary (create a copy to avoid modifying original from detect_apriltag if it's reused)
+                current_tag_processed = tag_data.copy()
+                current_tag_processed['offset_x'] = offset_x
+                current_tag_processed['offset_y'] = offset_y
+                processed_tags_for_sharing.append(current_tag_processed)
+
+                # Drawing on frame (using data from current_tag_processed)
+                r_center = current_tag_processed['center']
+                # Ensure corners are int for drawing, it should be float from detection for area calc
+                r_corners = current_tag_processed['corners'].astype(int) 
+                r_tag_id = current_tag_processed['tag_id']
+                r_pose_t = current_tag_processed['pose_t']
+                r_area = current_tag_processed['area'] # Area is already in tag_data
+
+                for i in range(4):
+                    cv2.line(frame_resized, tuple(r_corners[i]), tuple(r_corners[(i + 1) % 4]), (0, 255, 0), 2)
+                cv2.circle(frame_resized, r_center, 5, (0, 0, 255), -1)
+                cv2.putText(frame_resized, f"ID: {r_tag_id}", (r_center[0] - 10, r_center[1] - 20), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 255), 2)
+                cv2.putText(frame_resized, f"Pos: ({float(r_pose_t[0]):.2f}, {float(r_pose_t[1]):.2f}, {float(r_pose_t[2]):.2f})", (r_center[0] - 10, r_center[1] + 20), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0,0,255),1)
+                cv2.putText(frame_resized, f"Area: {r_area:.0f}", (r_center[0] - 10, r_center[1] + 40), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0,0,255),1)
+                cv2.putText(frame_resized, f"Offset: ({offset_x}, {offset_y})", (r_center[0] - 10, r_center[1] + 60), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0,0,255),1)
         else:
-            print("No Tags")
+            # No tags detected this frame
+            pass # No need to print "No Tags" every frame, can be noisy
 
-        # current_detection_details = None
-        # if tag_info_dict:
-        #     # Calculate area
-        #     area = calculate_area(tag_info_dict['corners'])
-        #     # Calculate center offset
-        #     offset_x, offset_y = calculate_center_offset(tag_info_dict['center'], frame_width, frame_height)
-
-        #     # Prepare the full data dictionary for this detection
-        #     current_detection_details = {
-        #         'tag_id': tag_info_dict['tag_id'],
-        #         'center': tag_info_dict['center'],
-        #         'corners': tag_info_dict['corners'], # Keep as numpy array for potential use
-        #         'pose_t': tag_info_dict['pose_t'],
-        #         'pose_R': tag_info_dict['pose_R'],
-        #         'angle': tag_info_dict['angle'],
-        #         'area': area,
-        #         'offset_x': offset_x,
-        #         'offset_y': offset_y
-        #     }
-
-        #     # Drawing on frame (similar to before, but using data from current_detection_details)
-        #     r_center = current_detection_details['center']
-        #     r_corners = current_detection_details['corners'].astype(int) # Ensure corners are int for drawing
-        #     r_tag_id = current_detection_details['tag_id']
-        #     r_pose_t = current_detection_details['pose_t']
-
-        #     for i in range(4):
-        #         cv2.line(frame_resized, tuple(r_corners[i]), tuple(r_corners[(i+1) % 4]), (0, 255, 0), 2)
-        #     cv2.circle(frame_resized, r_center, 5, (0, 0, 255), -1)
-        #     cv2.putText(frame_resized, f"ID: {r_tag_id}", (r_center[0] - 10, r_center[1] - 20), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 255), 2)
-        #     cv2.putText(frame_resized, f"Pos: ({float(r_pose_t[0]):.2f}, {float(r_pose_t[1]):.2f}, {float(r_pose_t[2]):.2f})", (r_center[0] - 10, r_center[1] + 20), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 255), 2)
-        #     cv2.putText(frame_resized, f"Area: {area:.2f}", (r_center[0] - 10, r_center[1] + 40), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 255), 2)
-        #     cv2.putText(frame_resized, f"Offset: ({offset_x}, {offset_y})", (r_center[0] - 10, r_center[1] + 60), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 255), 2)
-
-        # latest_tag_data_shared[0] = current_detection_details # Store the dict or None
-        # print(latest_tag_data_shared[0]) # Optional: for debugging
+        latest_tag_data_shared[0] = processed_tags_for_sharing if processed_tags_for_sharing else None
+        
         cv2.imshow("Tello Key Record", frame_resized)
         if cv2.waitKey(1) & 0xFF == ord('q'):
             stop_event.set()
@@ -207,30 +221,44 @@ def pygame_control_thread(drone, stop_event, record_dict_ref, record_lock_ref, g
                 elif pygame.K_1 <= key <= pygame.K_9:
                     user_tag_num = key - pygame.K_0 # This is the 1-9 key
                     
-                    latest_tag_data = get_latest_tag_data_func() # This gets the dictionary
+                    all_detected_tags_at_keypress = get_latest_tag_data_func() # This gets the list of tag dicts or None
                     
-                    if latest_tag_data: # Check if a tag was detected
-                        # Make copies of numpy arrays before storing
-                        data_to_store = latest_tag_data.copy() # Shallow copy is fine for top-level dict
-                        data_to_store['pose_t'] = latest_tag_data['pose_t'].copy()
-                        data_to_store['pose_R'] = latest_tag_data['pose_R'].copy()
-                        if isinstance(latest_tag_data['corners'], np.ndarray):
-                             data_to_store['corners'] = latest_tag_data['corners'].copy()
-                        # 'center' and 'angle' are tuples, 'tag_id', 'area', 'offset_x', 'offset_y' are primitives - no deep copy needed
-
+                    if all_detected_tags_at_keypress: # Check if any tags were detected
+                        num_tags_recorded_this_press = 0
                         with record_lock_ref:
-                            # If the current entry for user_tag_num is not a list (e.g., it's a loaded summary dict),
-                            # or if the key doesn't exist, initialize it as a new list for raw data.
-                            if user_tag_num not in record_dict_ref or not isinstance(record_dict_ref[user_tag_num], list):
-                                record_dict_ref[user_tag_num] = []
-                            record_dict_ref[user_tag_num].append(data_to_store)
-                            print(f"Recorded data for user tag num {user_tag_num}: "
-                                  f"Actual Tag ID {data_to_store['tag_id']}, Area {data_to_store['area']:.2f}")
-                            save_records_to_json(record_dict_ref) # Save after each recording
-                            info = f"Recorded for user tag {user_tag_num}"
+                            # Ensure the entry for user_tag_num is a dictionary (to hold actual_tag_ids)
+                            if user_tag_num not in record_dict_ref or not isinstance(record_dict_ref[user_tag_num], dict):
+                                record_dict_ref[user_tag_num] = {}
+                            
+                            user_records_for_actual_tags = record_dict_ref[user_tag_num]
+
+                            for tag_data_to_store in all_detected_tags_at_keypress:
+                                actual_tag_id = tag_data_to_store['tag_id']
+                                
+                                # Ensure the entry for this actual_tag_id is a list (to hold individual records)
+                                if actual_tag_id not in user_records_for_actual_tags:
+                                    user_records_for_actual_tags[actual_tag_id] = []
+                                
+                                # Make copies of numpy arrays before storing
+                                data_copy = tag_data_to_store.copy()
+                                data_copy['pose_t'] = tag_data_to_store['pose_t'].copy()
+                                data_copy['pose_R'] = tag_data_to_store['pose_R'].copy()
+                                if isinstance(tag_data_to_store['corners'], np.ndarray):
+                                     data_copy['corners'] = tag_data_to_store['corners'].copy()
+                                # Other fields like 'center', 'angle', 'area', 'offset_x', 'offset_y' are primitives or tuples, shallow copy is fine.
+
+                                user_records_for_actual_tags[actual_tag_id].append(data_copy)
+                                num_tags_recorded_this_press += 1
+                                print(f"  Recorded for user key {user_tag_num}: Actual Tag ID {actual_tag_id}, Area {data_copy['area']:.0f}")
+
+                        if num_tags_recorded_this_press > 0:
+                            save_records_to_json(record_dict_ref) # Save after each successful recording event
+                            info = f"Rec for {user_tag_num}: {num_tags_recorded_this_press} tag(s)"
+                        else: # Should not happen if all_detected_tags_at_keypress was not empty
+                            info = f"No new tag data for {user_tag_num}"
                     else:
-                        info = f"No AprilTag in view to record for {user_tag_num}"
-                        print(f"Attempted to record for user tag {user_tag_num}, but no AprilTag detected.")
+                        info = f"No AprilTags in view to record for {user_tag_num}"
+                        print(f"Attempted to record for user key {user_tag_num}, but no AprilTags detected.")
         
         # Stop movement if no key is pressed (remains the same)
         # ...existing code...
@@ -244,37 +272,68 @@ def pygame_control_thread(drone, stop_event, record_dict_ref, record_lock_ref, g
         clock.tick(30)
     pygame.quit()
 
-def save_records_to_json(records_to_save): # Renamed parameter
+def save_records_to_json(records_input): # Renamed parameter for clarity
     out_json = {}
-    for user_tag_num_key, data_for_tag in records_to_save.items(): # user_tag_num_key is int from record_dict
+    # records_input is the main record_dict
+    for user_tag_num_key, actual_tags_dict in records_input.items():
         user_tag_num_str = str(user_tag_num_key) # JSON keys must be strings
+        out_json[user_tag_num_str] = {}
 
-        if isinstance(data_for_tag, list): # This is raw data recorded (or re-recorded) in this session
-            recorded_data_list = data_for_tag
-            if not recorded_data_list: # Should not happen if we append, but good check
-                print(f"Info: No raw data to save for user tag {user_tag_num_str}.")
+        if not isinstance(actual_tags_dict, dict):
+            # This might be an old summary format loaded for a user_tag_num that wasn't re-recorded.
+            # Pass it through if it's a dict, otherwise skip.
+            if isinstance(actual_tags_dict, dict): # Check if it's a dict (summary)
+                 out_json[user_tag_num_str] = actual_tags_dict
+                 print(f"Info: Passing through existing summary for user key {user_tag_num_str} (not re-recorded this session).")
+            else:
+                print(f"Warning: Skipping user key {user_tag_num_str}, data is not in expected dictionary format: {type(actual_tags_dict)}")
+            continue
+
+        for actual_tag_id_key, recorded_data_list in actual_tags_dict.items():
+            actual_tag_id_str = str(actual_tag_id_key)
+
+            if not isinstance(recorded_data_list, list) or not recorded_data_list:
+                # This could be an entry from a loaded summary that wasn't a list,
+                # or an empty list if somehow a tag ID was created but no data recorded.
+                # If it's a dict, it's part of a loaded summary for this specific actual_tag_id.
+                if isinstance(recorded_data_list, dict): # Part of a loaded summary for this actual_tag_id
+                    out_json[user_tag_num_str][actual_tag_id_str] = recorded_data_list
+                    # print(f"Info: Passing through existing summary for user key {user_tag_num_str}, actual tag ID {actual_tag_id_str}.")
+                else:
+                    print(f"Info: No raw data to process for user key {user_tag_num_str}, actual tag ID {actual_tag_id_str}. Skipping.")
                 continue
 
             num_records = len(recorded_data_list)
-            # All items in recorded_data_list are expected to be dicts with 'tag_id' etc.
-            actual_tag_id = recorded_data_list[0]['tag_id']
-
-            avg_translation = np.mean([rec['pose_t'] for rec in recorded_data_list], axis=0).tolist()
-            avg_rotation_matrix = np.mean([rec['pose_R'] for rec in recorded_data_list], axis=0).tolist()
-            avg_angle = np.mean([rec['angle'] for rec in recorded_data_list], axis=0).tolist()
-            avg_area = float(np.mean([rec['area'] for rec in recorded_data_list]))
             
-            avg_center_x = float(np.mean([rec['center'][0] for rec in recorded_data_list]))
-            avg_center_y = float(np.mean([rec['center'][1] for rec in recorded_data_list]))
+            # Ensure all items in recorded_data_list are dicts with expected keys
+            # This is important because loaded data might be mixed in if not careful with initialization.
+            # However, the recording logic should ensure new recordings are lists of dicts.
+            valid_records = [rec for rec in recorded_data_list if isinstance(rec, dict) and 'pose_t' in rec]
+            if not valid_records:
+                print(f"Warning: No valid records found for user key {user_tag_num_str}, actual tag ID {actual_tag_id_str} for averaging. Skipping.")
+                continue
+            
+            num_records = len(valid_records) # Update num_records based on valid ones
+
+            # All items in valid_records are expected to be dicts with 'tag_id' etc.
+            # actual_tag_id is already known from actual_tag_id_key
+
+            avg_translation = np.mean([rec['pose_t'] for rec in valid_records], axis=0).tolist()
+            avg_rotation_matrix = np.mean([rec['pose_R'] for rec in valid_records], axis=0).tolist()
+            avg_angle = np.mean([rec['angle'] for rec in valid_records], axis=0).tolist()
+            avg_area = float(np.mean([rec['area'] for rec in valid_records]))
+            
+            avg_center_x = float(np.mean([rec['center'][0] for rec in valid_records]))
+            avg_center_y = float(np.mean([rec['center'][1] for rec in valid_records]))
             avg_center = [avg_center_x, avg_center_y]
 
-            avg_offset_x = float(np.mean([rec['offset_x'] for rec in recorded_data_list]))
-            avg_offset_y = float(np.mean([rec['offset_y'] for rec in recorded_data_list]))
+            avg_offset_x = float(np.mean([rec['offset_x'] for rec in valid_records]))
+            avg_offset_y = float(np.mean([rec['offset_y'] for rec in valid_records]))
             avg_offset = [avg_offset_x, avg_offset_y]
 
-            out_json[user_tag_num_str] = {
+            out_json[user_tag_num_str][actual_tag_id_str] = {
                 "num_records": num_records,
-                "actual_tag_id": actual_tag_id,
+                # "actual_tag_id": actual_tag_id_key, # Redundant, it's the key
                 "avg_translation": avg_translation,
                 "avg_rotation_matrix": avg_rotation_matrix,
                 "avg_angle": avg_angle,
@@ -282,15 +341,6 @@ def save_records_to_json(records_to_save): # Renamed parameter
                 "avg_center": avg_center,
                 "avg_offset": avg_offset
             }
-        elif isinstance(data_for_tag, dict): # This is a summary loaded and not touched in this session
-            # Pass through the existing summary dictionary.
-            # Ensure all its values are JSON serializable if they weren't already.
-            # (load_records should handle this if JSON was valid)
-            out_json[user_tag_num_str] = data_for_tag
-            print(f"Info: Passing through existing summary for user tag {user_tag_num_str}.")
-        else:
-            print(f"Warning: Unexpected data type for user tag {user_tag_num_str} in save_records_to_json. Skipping.")
-            continue
             
     try:
         with open(JSON_FILE_PATH, 'w') as f:
@@ -305,13 +355,13 @@ if __name__ == '__main__':
     drone = init_tello()
     stop_event = threading.Event()
     
-    # Shared data structure for the latest detected tag's full details
-    # This will hold a dictionary or None
+    # Shared data structure for the latest detected tags' full details
+    # This will hold a LIST of tag dictionaries, or None if no tags are detected.
     latest_tag_data_shared = [None] 
 
     video_thread = threading.Thread(target=video_apriltag_thread, args=(drone, stop_event, latest_tag_data_shared))
     
-    # Lambda to pass to pygame thread to get the latest data
+    # Lambda to pass to pygame thread to get the latest data (list of tags or None)
     get_latest_tag_data_func = lambda: latest_tag_data_shared[0]
 
     control_thread = threading.Thread(target=pygame_control_thread, args=(drone, stop_event, record_dict, record_lock, get_latest_tag_data_func))
