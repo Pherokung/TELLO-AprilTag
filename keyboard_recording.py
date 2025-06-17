@@ -7,7 +7,7 @@ import json
 import time
 import pygame
 # Updated imports:
-from april_tag import calculate_area, detect_apriltag, calculate_center_offset
+from april_tag import *
 # helper_func.rot2eul is used within detect_apriltag
 
 # AprilTag detector setup
@@ -92,43 +92,48 @@ def video_apriltag_thread(drone, stop_event, latest_tag_data_shared): # Renamed 
         frame_height, frame_width = frame_resized.shape[:2]
 
         # Use detect_apriltag from april_tag.py
-        tag_info_dict = detect_apriltag(frame_resized, detector) # detector is global
+        tags = detect_apriltag(frame_resized, detector) # detector is global
+        if tags:
+            for tag in tags:
+                frame_resized = draw_apriltag_info(frame_resized, tag, frame_width, frame_height)
+        else:
+            print("No Tags")
 
-        current_detection_details = None
-        if tag_info_dict:
-            # Calculate area
-            area = calculate_area(tag_info_dict['corners'])
-            # Calculate center offset
-            offset_x, offset_y = calculate_center_offset(tag_info_dict['center'], frame_width, frame_height)
+        # current_detection_details = None
+        # if tag_info_dict:
+        #     # Calculate area
+        #     area = calculate_area(tag_info_dict['corners'])
+        #     # Calculate center offset
+        #     offset_x, offset_y = calculate_center_offset(tag_info_dict['center'], frame_width, frame_height)
 
-            # Prepare the full data dictionary for this detection
-            current_detection_details = {
-                'tag_id': tag_info_dict['tag_id'],
-                'center': tag_info_dict['center'],
-                'corners': tag_info_dict['corners'], # Keep as numpy array for potential use
-                'pose_t': tag_info_dict['pose_t'],
-                'pose_R': tag_info_dict['pose_R'],
-                'angle': tag_info_dict['angle'],
-                'area': area,
-                'offset_x': offset_x,
-                'offset_y': offset_y
-            }
+        #     # Prepare the full data dictionary for this detection
+        #     current_detection_details = {
+        #         'tag_id': tag_info_dict['tag_id'],
+        #         'center': tag_info_dict['center'],
+        #         'corners': tag_info_dict['corners'], # Keep as numpy array for potential use
+        #         'pose_t': tag_info_dict['pose_t'],
+        #         'pose_R': tag_info_dict['pose_R'],
+        #         'angle': tag_info_dict['angle'],
+        #         'area': area,
+        #         'offset_x': offset_x,
+        #         'offset_y': offset_y
+        #     }
 
-            # Drawing on frame (similar to before, but using data from current_detection_details)
-            r_center = current_detection_details['center']
-            r_corners = current_detection_details['corners'].astype(int) # Ensure corners are int for drawing
-            r_tag_id = current_detection_details['tag_id']
-            r_pose_t = current_detection_details['pose_t']
+        #     # Drawing on frame (similar to before, but using data from current_detection_details)
+        #     r_center = current_detection_details['center']
+        #     r_corners = current_detection_details['corners'].astype(int) # Ensure corners are int for drawing
+        #     r_tag_id = current_detection_details['tag_id']
+        #     r_pose_t = current_detection_details['pose_t']
 
-            for i in range(4):
-                cv2.line(frame_resized, tuple(r_corners[i]), tuple(r_corners[(i+1) % 4]), (0, 255, 0), 2)
-            cv2.circle(frame_resized, r_center, 5, (0, 0, 255), -1)
-            cv2.putText(frame_resized, f"ID: {r_tag_id}", (r_center[0] - 10, r_center[1] - 20), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 255), 2)
-            cv2.putText(frame_resized, f"Pos: ({float(r_pose_t[0]):.2f}, {float(r_pose_t[1]):.2f}, {float(r_pose_t[2]):.2f})", (r_center[0] - 10, r_center[1] + 20), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 255), 2)
-            cv2.putText(frame_resized, f"Area: {area:.2f}", (r_center[0] - 10, r_center[1] + 40), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 255), 2)
-            cv2.putText(frame_resized, f"Offset: ({offset_x}, {offset_y})", (r_center[0] - 10, r_center[1] + 60), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 255), 2)
+        #     for i in range(4):
+        #         cv2.line(frame_resized, tuple(r_corners[i]), tuple(r_corners[(i+1) % 4]), (0, 255, 0), 2)
+        #     cv2.circle(frame_resized, r_center, 5, (0, 0, 255), -1)
+        #     cv2.putText(frame_resized, f"ID: {r_tag_id}", (r_center[0] - 10, r_center[1] - 20), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 255), 2)
+        #     cv2.putText(frame_resized, f"Pos: ({float(r_pose_t[0]):.2f}, {float(r_pose_t[1]):.2f}, {float(r_pose_t[2]):.2f})", (r_center[0] - 10, r_center[1] + 20), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 255), 2)
+        #     cv2.putText(frame_resized, f"Area: {area:.2f}", (r_center[0] - 10, r_center[1] + 40), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 255), 2)
+        #     cv2.putText(frame_resized, f"Offset: ({offset_x}, {offset_y})", (r_center[0] - 10, r_center[1] + 60), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 0, 255), 2)
 
-        latest_tag_data_shared[0] = current_detection_details # Store the dict or None
+        # latest_tag_data_shared[0] = current_detection_details # Store the dict or None
         # print(latest_tag_data_shared[0]) # Optional: for debugging
         cv2.imshow("Tello Key Record", frame_resized)
         if cv2.waitKey(1) & 0xFF == ord('q'):
