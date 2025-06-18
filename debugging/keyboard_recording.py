@@ -7,6 +7,9 @@ import json
 import time
 import pygame
 # Updated imports:
+import sys
+import os
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 from april_tag import detect_apriltag, calculate_center_offset, calculate_area # Explicitly import
 # helper_func.rot2eul is used within detect_apriltag
 
