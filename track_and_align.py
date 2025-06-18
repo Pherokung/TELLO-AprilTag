@@ -32,8 +32,9 @@ POSITIONING_PIXEL_TOLERANCE = 10 # Tolerance for pixel-based positioning
 # Repeat tuning for each axis/control loop (yaw, up/down, left/right) independently if possible.
 
 pid_yaw = [0.4, 0.4, 0]  # For yaw control (rotation based on pixel offset during tracking, or angle during alignment)
-pid_ud = [0.2, 0.15, 0]   # For up/down control (vertical translation based on pixel offset or direct y-coordinate error)
-pid_lr = [0.10, 0.15, 0]   # For left/right control (lateral translation based on pixel offset or direct x-coordinate error)
+pid_ud = [0.30, 0.15, 0]   # For up/down control (vertical translation based on pixel offset or direct y-coordinate error)
+pid_lr = [0.20, 0.15, 0]   # For left/right control (lateral translation based on pixel offset or direct x-coordinate error)
+pid_lr_yaw = [0.15, 0.15, 0] 
 
 def is_aligning_done(current_angle_yaw_rad, desired_angle_rad, angle_threshold_rad):
     """
@@ -103,10 +104,10 @@ def is_tracking_done(current_area, target_area, current_offset_x, current_offset
     offset_tolerance_px: allowed pixel offset from center (for x and y).
     """
     area_condition = abs(current_area - target_area) < area_tolerance # Use parameter
-    offset_x_condition = abs(current_offset_x) < offset_tolerance_px # Use parameter
-    offset_y_condition = abs(current_offset_y) < offset_tolerance_px # Use parameter
+    # offset_x_condition = abs(current_offset_x) < offset_tolerance_px # Use parameter
+    # offset_y_condition = abs(current_offset_y) < offset_tolerance_px # Use parameter
 
-    if area_condition and offset_x_condition and offset_y_condition:
+    if area_condition:
         # print(f"Tracking done: Area diff {abs(current_area - target_area)}, Offset X {abs(current_offset_x)}, Offset Y {abs(current_offset_y)}")
         return True
     # print(f"Tracking not done: Area diff {abs(current_area - target_area)} (Area: {current_area} vs Target: {target_area}), Offset X {abs(current_offset_x)}, Offset Y {abs(current_offset_y)}")
@@ -116,7 +117,7 @@ def is_tracking_done(current_area, target_area, current_offset_x, current_offset
 def track_apriltag(tello, area, 
                    ox, oy,  # ox: horizontal pixel offset, oy: vertical pixel offset
                    pError_yaw, pError_ud_track, # pError_ud_track to distinguish from positioning
-                   target_area):
+                   target_area, area_tolerance):
 
     error_yaw_pixel = ox  # Current horizontal pixel offset
     # Yaw speed control based on horizontal pixel offset
@@ -125,9 +126,9 @@ def track_apriltag(tello, area,
 
     # Forward/backward speed control based on area
     fb_speed = 0
-    if area > target_area + AREA_TOLERANCE_TRACKING:  # Too close
+    if area > target_area + area_tolerance:  # Too close
         fb_speed = -20  # Move back
-    elif area < target_area - AREA_TOLERANCE_TRACKING and area != 0:  # Too far
+    elif area < target_area - area_tolerance and area != 0:  # Too far
         fb_speed = 20  # Move forward
     
     # Up/down speed control based on vertical pixel offset
@@ -165,10 +166,11 @@ def is_positioning_pixel_done(current_tag_center_x_coord, current_tag_center_y_c
     error_x_px = abs(current_tag_center_x_coord - target_abs_x)
     error_y_px = abs(current_tag_center_y_coord - target_abs_y)
 
+    print("tolerance = ", pixel_tolerance)
     if error_x_px < pixel_tolerance and error_y_px < pixel_tolerance:
-        # print(f"Positioning (pixel) done. Errors (px): ({error_x_px:.0f}, {error_y_px:.0f})")
+        print(f"Positioning (pixel) done. Errors (px): ({error_x_px:.0f}, {error_y_px:.0f})")
         return True
-    # print(f"Positioning (pixel) NOT done. Current Center: ({current_tag_center_x_coord},{current_tag_center_y_coord}), Target Abs Coords: ({target_abs_x},{target_abs_y}), Errors (px): ({error_x_px:.0f}, {error_y_px:.0f})")
+    print(f"Positioning (pixel) NOT done. Current Center: ({current_tag_center_x_coord},{current_tag_center_y_coord}), Target Abs Coords: ({target_abs_x},{target_abs_y}), Errors (px): ({error_x_px:.0f}, {error_y_px:.0f})")
     return False
 
 def position_apriltag_pixel_based(tello, current_tag_center_x_coord, current_tag_center_y_coord,
@@ -186,12 +188,14 @@ def position_apriltag_pixel_based(tello, current_tag_center_x_coord, current_tag
     # Error for Left/Right PID: error = target_absolute_X - current_tag_X
     # If positive, target is to the right of current tag center. Drone needs to move RIGHT (positive LR RC by Tello SDK standard).
     error_lr_for_pid = target_abs_x - current_tag_center_x_coord
+    print("error_lr = ", error_lr_for_pid)
     lr_rc_command = pid_lr[0] * error_lr_for_pid + pid_lr[1] * (error_lr_for_pid - pError_lr_px)
     lr_rc_command = int(np.clip(lr_rc_command, -100, 100))
 
     # Error for Up/Down PID: error = current_tag_Y - target_absolute_Y
     # If positive, current tag center is 'lower' (larger Y value in image coords) than target. Drone needs to move UP (positive UD RC by Tello SDK standard).
     error_ud_for_pid = current_tag_center_y_coord - target_abs_y 
+    print("error_ud = ", error_ud_for_pid)
     ud_rc_command = pid_ud[0] * error_ud_for_pid + pid_ud[1] * (error_ud_for_pid - pError_ud_px)
     ud_rc_command = int(np.clip(ud_rc_command, -100, 100))
 
@@ -277,6 +281,7 @@ def master_track_and_align_apriltag(
     if final_position_tolerance_px is None:
         final_position_tolerance_px = POSITIONING_PIXEL_TOLERANCE 
 
+    print("master tolerance = ", offset_tolerance_tracking_px)
     if not tag_info:
         if current_state != STATE_IDLE:
             tello.send_rc_control(0, 0, 0, 0)
@@ -298,11 +303,12 @@ def master_track_and_align_apriltag(
     if current_state == STATE_TRACKING:
         if not is_tracking_done(current_area, target_area, offset_x_true_center, offset_y_true_center, 
                                 area_tolerance_tracking, offset_tolerance_tracking_px):
+            print(f"Target: {target_area}\tArea: {current_area}")
             pid_errors['pError_yaw_track'], pid_errors['pError_ud_track'] = track_apriltag(
                 tello, current_area, 
                 offset_x_true_center, offset_y_true_center, 
                 pid_errors['pError_yaw_track'], pid_errors['pError_ud_track'],
-                target_area
+                target_area, area_tolerance_tracking
                 # Note: track_apriltag uses global AREA_TOLERANCE_TRACKING for fb_speed logic internally
                 # and its own hardcoded fb_speed values. The tracking_fb_speed parameter is not directly used by it yet.
             )

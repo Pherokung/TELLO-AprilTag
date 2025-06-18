@@ -1,34 +1,89 @@
-def perform_stage(stage, angle):
+from movement_func import *
+from april_tag import is_tag_id_exist
+from track_and_align import *
 
-	if stage == 1:
-		flight_time = compound_move_tello(tello, "down", 20, "forward", 170)
-		return stage + 1, flight_time
+DEFAULT_PID_ERRORS = {
+    'pError_yaw_track': 0,
+    'pError_ud_track': 0,
+    'pError_lr_pixel_pos': 0,
+    'pError_ud_pixel_pos': 0
+}
 
-	elif stage == 2:
-		if angle[1] >= -0.05 and angle[1] <= 0.05:
-			tello.send_rc_control(0, 0, 0, 0)
-			stage = stage + 1
+def track_and_align_with_tag_id(tello, stage, detected_tags, state, pid_errors, frame_siz, tag_id, target_area, target_x, target_y, target_yaw):
 
-		elif angle[1] < -0.05:
-			tello.send_rc_control(0, 0, 0, -10)
+	next_stage = stage
+	flight_time = 0.01
+	tag = is_tag_id_exist(detected_tags, tag_id)
+	if tag:
+		upd_state, upd_pid_errors, rc_sent = master_track_and_align_apriltag(
+			tello, tag, 
+			frame_siz[0], frame_siz[1],
+			target_area, target_x, 
+			target_y, target_yaw,
+			state, pid_errors,
+			area_tolerance_tracking=300,
+			align_yaw_power=10,
+    		align_lr_power=10,
+			final_position_tolerance_px = 30
 
-		elif angle[1] > 0.05:
-			tello.send_rc_control(0, 0, 0, 10)
+		)
 
-		return stage, 0.1
+		if upd_state == STATE_HOLDING:
+			# go to next stage and reset everything
+			next_stage = stage + 1
+			upd_state = STATE_IDLE
+			upd_pid_errors = DEFAULT_PID_ERRORS
+	else:
+		upd_state = state
+		upd_pid_errors = pid_errors
+	
+	return next_stage, flight_time, upd_state, upd_pid_errors
 
-	elif stage == 3:
+def pathing(tello, stage, detected_tags, state, pid_errors, frame_siz = [960, 720]):
+	"""
+		Pathing function for all stages of the drone path
+
+		Args:
+			tello: the tello obj
+			stage: current stage of the drone pathing
+			detected_tags: all tags detected by the detect_apriltag func
+			state: current state of the drone
+			pid_errors: updated pid_errors
+			frame_siz: contain [frame_width, frame_height]
+
+		Return:
+			next_stage: updated stage
+			flight_time: how long this function needs to be call again
+			upd_state: updated state
+			upd_pid_errors updated pid_errors
+	"""
+
+	if stage == 1: #stabilize 
+		tello.send_rc_control(0, 0, 0, 0)
+		next_stage = stage + 1
+		flight_time = 1
+		upd_state = STATE_TRACKING
+		upd_pid_errors = DEFAULT_PID_ERRORS
+		
+	elif stage == 2: #align the selected tag
+		
+		next_stage, flight_time, upd_state, upd_pid_errors = track_and_align_with_tag_id(
+			tello, stage, detected_tags, state, pid_errors, frame_siz, 
+			tag_id = 1,
+			target_area = 600,
+			target_x = 0,
+			target_y = 0,
+			target_yaw = 0
+		)
+
+	elif stage == 3: #move the tello forward
 		flight_time = compound_move_tello(tello, "up", 50, "forward", 150)
-		return stage + 1, flight_time
+		next_stage = stage + 1
+		flight_time = 1
+		upd_state = STATE_IDLE
+		upd_pid_errors = DEFAULT_PID_ERRORS
 
-	elif stage == 4:
-		tello.send_rc_control(0, 0, 0, 0)
-		return stage + 1, 3
+			
+	return next_stage, flight_time, upd_state, upd_pid_errors
+	# return next_stage, flight_time
 
-	elif stage == 5:
-		flight_time = turn_tello(tello, 360)
-		return stage + 1, flight_time
-
-	elif stage == 6:
-		tello.send_rc_control(0, 0, 0, 0)
-		return stage + 1, 3

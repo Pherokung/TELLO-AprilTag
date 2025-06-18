@@ -96,3 +96,13 @@ def draw_apriltag_info(frame, tag_data, frame_width, frame_height, target_x_offs
         cv2.putText(frame, f"CamOffsetPx: ({offset_x_display:.0f},{offset_y_display:.0f})", (center[0] - 10, center[1] + 80), cv2.FONT_HERSHEY_SIMPLEX, 0.4, (0,0,255),2)
 
     return frame
+
+def is_tag_id_exist(detected_tags, tag_id):
+	#return the tag with tag_id if it exists, otherwise return []
+    if len(detected_tags) == 0:
+        return [] 
+    for tag in detected_tags:
+        if str(tag.get('tag_id', -1)) == str(tag_id):
+            return tag
+
+    return []
