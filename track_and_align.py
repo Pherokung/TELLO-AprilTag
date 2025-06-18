@@ -150,72 +150,61 @@ def track_apriltag(tello, area,
     return error_yaw_pixel, error_ud_pixel_input # Return current pixel errors for PD controller
 
 def is_positioning_pixel_done(current_tag_center_x_coord, current_tag_center_y_coord,
+                               current_area,
                                frame_width, frame_height,
                                target_x_offset_from_frame_center, target_y_offset_from_frame_center,
-                               pixel_tolerance): # Parameter already exists
+                               target_area, area_tolerance, pixel_tolerance):    
     """
-    Checks if the drone has positioned the AprilTag's center close enough to the target pixel offset.
-    target_x_offset_from_frame_center: desired x offset from true frame center (positive right).
-    target_y_offset_from_frame_center: desired y offset from true frame center (positive down for image coords, but Tello up is positive RC).
-                                         Let's keep it consistent: positive means target is 'lower' in frame if y increases downwards.
-                                         For our target of -10, it means 10px *above* center.
+    Returns True if the tag center is within pixel tolerance of the target offset AND area is within tolerance.
+    """
+    target_abs_x = frame_width // 2 + target_x_offset_from_frame_center
+    target_abs_y = frame_height // 2 + target_y_offset_from_frame_center
+    pixel_x_ok = abs(current_tag_center_x_coord - target_abs_x) < pixel_tolerance
+    pixel_y_ok = abs(current_tag_center_y_coord - target_abs_y) < pixel_tolerance
+    area_ok = abs(current_area - target_area) < area_tolerance
+    return pixel_x_ok and pixel_y_ok and area_ok
+
+
+def position_apriltag_pixel_based(
+    tello, current_tag_center_x_coord, current_tag_center_y_coord,
+    current_area,
+    frame_width, frame_height,
+    target_x_offset_from_frame_center,
+    target_y_offset_from_frame_center,
+    target_area, area_tolerance,
+    pError_lr_px, pError_ud_px
+):
+    """
+    Moves the Tello to position the AprilTag's center at a specific pixel offset from the frame center,
+    and keeps the tag at a constant area (distance).
+    Uses LR, UD, and FB controls.
     """
     target_abs_x = frame_width // 2 + target_x_offset_from_frame_center
     target_abs_y = frame_height // 2 + target_y_offset_from_frame_center
 
-    error_x_px = abs(current_tag_center_x_coord - target_abs_x)
-    error_y_px = abs(current_tag_center_y_coord - target_abs_y)
-
-    print("tolerance = ", pixel_tolerance)
-    if error_x_px < pixel_tolerance and error_y_px < pixel_tolerance:
-        print(f"Positioning (pixel) done. Errors (px): ({error_x_px:.0f}, {error_y_px:.0f})")
-        return True
-    print(f"Positioning (pixel) NOT done. Current Center: ({current_tag_center_x_coord},{current_tag_center_y_coord}), Target Abs Coords: ({target_abs_x},{target_abs_y}), Errors (px): ({error_x_px:.0f}, {error_y_px:.0f})")
-    return False
-
-def position_apriltag_pixel_based(tello, current_tag_center_x_coord, current_tag_center_y_coord,
-                                 frame_width, frame_height,
-                                 target_x_offset_from_frame_center, # e.g., 10 (10px right of true center)
-                                 target_y_offset_from_frame_center, # e.g., -10 (10px up from true center)
-                                 pError_lr_px, pError_ud_px):
-    """
-    Moves the Tello to position the AprilTag's center at a specific pixel offset from the frame center.
-    Uses LR and UD controls.
-    """
-    target_abs_x = frame_width // 2 + target_x_offset_from_frame_center
-    target_abs_y = frame_height // 2 + target_y_offset_from_frame_center
-
-    # Error for Left/Right PID: error = target_absolute_X - current_tag_X
-    # If positive, target is to the right of current tag center. Drone needs to move RIGHT (positive LR RC by Tello SDK standard).
+    # LR (left/right) PID
     error_lr_for_pid = target_abs_x - current_tag_center_x_coord
-    print("error_lr = ", error_lr_for_pid)
     lr_rc_command = pid_lr[0] * error_lr_for_pid + pid_lr[1] * (error_lr_for_pid - pError_lr_px)
     lr_rc_command = int(np.clip(lr_rc_command, -100, 100))
 
-    # Error for Up/Down PID: error = current_tag_Y - target_absolute_Y
-    # If positive, current tag center is 'lower' (larger Y value in image coords) than target. Drone needs to move UP (positive UD RC by Tello SDK standard).
-    error_ud_for_pid = current_tag_center_y_coord - target_abs_y 
-    print("error_ud = ", error_ud_for_pid)
+    # UD (up/down) PID
+    error_ud_for_pid = current_tag_center_y_coord - target_abs_y
     ud_rc_command = pid_ud[0] * error_ud_for_pid + pid_ud[1] * (error_ud_for_pid - pError_ud_px)
     ud_rc_command = int(np.clip(ud_rc_command, -100, 100))
 
-    # Based on console logs, the drone's actual movement is opposite to the standard RC command interpretation for LR and UD.
-    # Therefore, we negate the calculated commands.
-    # Standard Tello: lr+ is RIGHT, ud+ is UP.
-    # Logged effect: lr+ resulted in LEFT, ud- (intended DOWN) resulted in UP (pixel Y decreased).
-    # This means to achieve RIGHT (lr+ effect), we need to send -lr_rc_command.
-    # To achieve DOWN (ud- effect), we need to send -ud_rc_command.
-    # If lr_rc_command is calculated to be positive (for RIGHT), send -lr_rc_command.
-    # If ud_rc_command is calculated to be negative (for DOWN), send -ud_rc_command.
-    
+    # FB (forward/backward) area-based control
+    fb_rc_command = 0
+    if current_area > target_area + area_tolerance:
+        fb_rc_command = -20  # Move back
+    elif current_area < target_area - area_tolerance and current_area != 0:
+        fb_rc_command = 20   # Move forward
+
+    # Negate LR and UD as before
     final_lr_command = -lr_rc_command
     final_ud_command = -ud_rc_command
+    final_fb_command = fb_rc_command
 
-    tello.send_rc_control(final_lr_command, 0, final_ud_command, 0) # lr, fb, ud, yaw
-    
-    # print(f"PosPx: TargetOffset({target_x_offset_from_frame_center},{target_y_offset_from_frame_center}) -> TargetAbs({target_abs_x},{target_abs_y})")
-    # print(f"PosPx: CurrentCenter({current_tag_center_x_coord},{current_tag_center_y_coord})")
-    # print(f"PosPx: Errors(lr,ud): ({error_lr_for_pid:.0f}, {error_ud_for_pid:.0f}), CalcRC(lr,ud): ({lr_rc_command}, {ud_rc_command}), SentRC(lr,ud): ({final_lr_command}, {final_ud_command})")
+    tello.send_rc_control(final_lr_command, final_fb_command, final_ud_command, 0)
 
     return error_lr_for_pid, error_ud_for_pid
 
@@ -332,13 +321,17 @@ def master_track_and_align_apriltag(
             
     elif current_state == STATE_POSITIONING_PIXEL:
         if not is_positioning_pixel_done(current_tag_center_x, current_tag_center_y, 
+                                         current_area,
                                          frame_width, frame_height, 
                                          target_x_offset_px, target_y_offset_px, 
+                                         target_area, area_tolerance_tracking,
                                          final_position_tolerance_px):
             pid_errors['pError_lr_pixel_pos'], pid_errors['pError_ud_pixel_pos'] = position_apriltag_pixel_based(
                 tello, current_tag_center_x, current_tag_center_y,
+                current_area,
                 frame_width, frame_height,
                 target_x_offset_px, target_y_offset_px,
+                target_area, area_tolerance_tracking,
                 pid_errors['pError_lr_pixel_pos'], pid_errors['pError_ud_pixel_pos']
             )
             rc_commands_sent = True
