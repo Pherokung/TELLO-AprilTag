@@ -1,4 +1,5 @@
 from movement_func import *
+from april_tag import is_tag_id_exist
 from track_and_align import *
 
 DEFAULT_PID_ERRORS = pid_errors = {
@@ -11,7 +12,7 @@ DEFAULT_PID_ERRORS = pid_errors = {
 def track_and_align_with_tag_id(tello, stage, detected_tags, state, pid_errors, frame_siz, tag_id, target_area, target_x, target_y, target_yaw):
 
 	next_stage = stage, flight_time = 0.01
-	tag = is_tag_exist(detected_tags, tag_id)
+	tag = is_tag_id_exist(detected_tags, tag_id)
 	if tag:
 		upd_state, upd_pid_errors, rc_sent = master_track_and_align_apriltag(
 			tello, tag, 
@@ -29,7 +30,7 @@ def track_and_align_with_tag_id(tello, stage, detected_tags, state, pid_errors, 
 	
 	return next_stage, flight_time, state, pid_errors
 
-def pathing(tello, stage, detected_tags, state, pid_errors, frame_siz):
+def pathing(tello, stage, detected_tags, state, pid_errors, frame_siz = [960, 720]):
 	"""
 		Pathing function for all stages of the drone path
 
@@ -68,10 +69,7 @@ def pathing(tello, stage, detected_tags, state, pid_errors, frame_siz):
 			flight_time = compound_move_tello(tello, "up", 50, "forward", 150)
 			next_stage = stage + 1, flight_time = 1, upd_state = STATE_IDLE, upd_pid_errors = DEFAULT_PID_ERRORS
 
-		case 4:
-
 			
-
-	# return next_stage, flight_time
 	return next_stage, flight_time, state, pid_errors
+	# return next_stage, flight_time
 
