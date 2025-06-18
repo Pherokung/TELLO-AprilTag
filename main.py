@@ -53,6 +53,7 @@ def init_tello():
     print("Battery:", drone.get_battery())
     #drone.set_video_direction(drone.CAMERA_DOWNWARD)
     drone.streamon()
+    drone.send_rc_control(0, 0, 0, 0)
     
     return drone
 
@@ -96,7 +97,7 @@ if __name__ == "__main__":
                 stage, flight_time, state, pid_errors = pathing(tello, stage, tag_info, state, pid_errors, frame_siz)
                 call_again = time.time() + flight_time
         
-        if stage == 4:
+        if stage == 6:
             break
 
     tello.land()
