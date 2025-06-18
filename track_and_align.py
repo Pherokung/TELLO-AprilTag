@@ -32,7 +32,7 @@ POSITIONING_PIXEL_TOLERANCE = 10 # Tolerance for pixel-based positioning
 # Repeat tuning for each axis/control loop (yaw, up/down, left/right) independently if possible.
 
 pid_yaw = [0.4, 0.4, 0]  # For yaw control (rotation based on pixel offset during tracking, or angle during alignment)
-pid_ud = [0.2, 0.15, 0]   # For up/down control (vertical translation based on pixel offset or direct y-coordinate error)
+pid_ud = [0.25, 0.15, 0]   # For up/down control (vertical translation based on pixel offset or direct y-coordinate error)
 pid_lr = [0.10, 0.15, 0]   # For left/right control (lateral translation based on pixel offset or direct x-coordinate error)
 
 def is_aligning_done(current_angle_yaw_rad, desired_angle_rad, angle_threshold_rad):
@@ -103,10 +103,10 @@ def is_tracking_done(current_area, target_area, current_offset_x, current_offset
     offset_tolerance_px: allowed pixel offset from center (for x and y).
     """
     area_condition = abs(current_area - target_area) < area_tolerance # Use parameter
-    offset_x_condition = abs(current_offset_x) < offset_tolerance_px # Use parameter
-    offset_y_condition = abs(current_offset_y) < offset_tolerance_px # Use parameter
+    # offset_x_condition = abs(current_offset_x) < offset_tolerance_px # Use parameter
+    # offset_y_condition = abs(current_offset_y) < offset_tolerance_px # Use parameter
 
-    if area_condition and offset_x_condition and offset_y_condition:
+    if area_condition:
         # print(f"Tracking done: Area diff {abs(current_area - target_area)}, Offset X {abs(current_offset_x)}, Offset Y {abs(current_offset_y)}")
         return True
     # print(f"Tracking not done: Area diff {abs(current_area - target_area)} (Area: {current_area} vs Target: {target_area}), Offset X {abs(current_offset_x)}, Offset Y {abs(current_offset_y)}")
@@ -298,6 +298,7 @@ def master_track_and_align_apriltag(
     if current_state == STATE_TRACKING:
         if not is_tracking_done(current_area, target_area, offset_x_true_center, offset_y_true_center, 
                                 area_tolerance_tracking, offset_tolerance_tracking_px):
+            print(f"Target: {target_area}\tArea: {current_area}")
             pid_errors['pError_yaw_track'], pid_errors['pError_ud_track'] = track_apriltag(
                 tello, current_area, 
                 offset_x_true_center, offset_y_true_center, 

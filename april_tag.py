@@ -102,7 +102,7 @@ def is_tag_id_exist(detected_tags, tag_id):
     if len(detected_tags) == 0:
         return [] 
     for tag in detected_tags:
-        if str(tag.tag_id) == str(tag_id):
+        if str(tag.get('tag_id', -1)) == str(tag_id):
             return tag
 
     return []
