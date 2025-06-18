@@ -8,8 +8,7 @@ DEFAULT_PID_ERRORS = pid_errors = {
     'pError_ud_pixel_pos': 0
 }
 
-def track_and_align_with_tag_id(tello, stage, detected_tags, state, pid_errors, frame_siz, 
-								tag_id, target_area, target_x, target_y, target_yaw):
+def track_and_align_with_tag_id(tello, stage, detected_tags, state, pid_errors, frame_siz, tag_id, target_area, target_x, target_y, target_yaw):
 
 	next_stage = stage, flight_time = 0.01
 	tag = is_tag_exist(detected_tags, tag_id)
@@ -65,7 +64,7 @@ def pathing(tello, stage, detected_tags, state, pid_errors, frame_siz):
 				target_yaw = 0
 			)
 
-		case 3: #moving the telo forward
+		case 3: #move the tello forward
 			flight_time = compound_move_tello(tello, "up", 50, "forward", 150)
 			next_stage = stage + 1, flight_time = 1, upd_state = STATE_IDLE, upd_pid_errors = DEFAULT_PID_ERRORS
 
