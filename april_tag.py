@@ -60,13 +60,13 @@ def detect_apriltag(frame, detector):
                     'area': area
                 }
             )
-    print("Tags: ", processed_tags)
+    # print("Tags: ", processed_tags)
     return processed_tags # Return the list of processed dictionaries
 
 def draw_apriltag_info(frame, tag_data, frame_width, frame_height, target_x_offset_px=None, target_y_offset_px=None, target_area=None):
     """Draws AprilTag detection information on the frame."""
     if not tag_data:
-        print("No tags to draw")
+        # print("No tags to draw")
         return
 
     center = tag_data['center'] # tuple of ints
@@ -78,7 +78,7 @@ def draw_apriltag_info(frame, tag_data, frame_width, frame_height, target_x_offs
 
     offset_x_display, offset_y_display = calculate_center_offset(center, frame_width, frame_height)
 
-    print(f"Drawing Tag {tag_id}")
+    # print(f"Drawing Tag {tag_id}")
 
     for i in range(4):
         cv2.line(frame, tuple(corners[i]), tuple(corners[(i + 1) % 4]), (0, 255, 0), 2)
