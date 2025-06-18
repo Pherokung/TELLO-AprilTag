@@ -218,8 +218,11 @@ def pygame_control_thread(drone, stop_event, record_dict_ref, record_lock_ref, g
                     drone.send_rc_control(speed, 0, 0, 0)
                     info = "Right"
 
-                elif pygame.K_1 <= key <= pygame.K_9:
-                    user_tag_num = key - pygame.K_0 # This is the 1-9 key
+                elif (pygame.K_1 <= key <= pygame.K_9) or key == pygame.K_0:
+                    if key == pygame.K_0:
+                        user_tag_num = 10
+                    else:
+                        user_tag_num = key - pygame.K_0 # 1-9 keys
                     
                     all_detected_tags_at_keypress = get_latest_tag_data_func() # This gets the list of tag dicts or None
                     
