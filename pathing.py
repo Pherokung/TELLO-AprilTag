@@ -21,9 +21,11 @@ def track_and_align_with_tag_id(tello, stage, detected_tags, state, pid_errors, 
 			target_area, target_x, 
 			target_y, target_yaw,
 			state, pid_errors,
-			area_tolerance_tracking=1000,
+			area_tolerance_tracking=300,
 			align_yaw_power=10,
     		align_lr_power=10,
+			final_position_tolerance_px = 30
+
 		)
 
 		if upd_state == STATE_HOLDING:
