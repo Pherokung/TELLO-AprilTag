@@ -99,8 +99,10 @@ def draw_apriltag_info(frame, tag_data, frame_width, frame_height, target_x_offs
 
 def is_tag_id_exist(detected_tags, tag_id):
 	#return the tag with tag_id if it exists, otherwise return []
-	return [] if len(detected_tags) == 0
-	for tag in detected_tags:
-		return tag if str(tag.tag_id) == str(tag_id)
+    if len(detected_tags) == 0:
+        return [] 
+    for tag in detected_tags:
+        if str(tag.tag_id) == str(tag_id):
+            return tag
 
-	return []
+    return []
