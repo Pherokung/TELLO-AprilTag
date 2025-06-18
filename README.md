@@ -1,9 +1,9 @@
 
 ## Drone Track
 
-![alt text](pathing\imgs\drone_track.png)
+![alt text](pathing/imgs/drone_track.png)
 
 ### Drone Path
 
 
-![alt text](pathing\imgs\drone_path.jpeg)
+![alt text](pathing/imgs/drone_path.jpeg)
