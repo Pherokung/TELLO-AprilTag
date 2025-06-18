@@ -34,6 +34,7 @@ POSITIONING_PIXEL_TOLERANCE = 10 # Tolerance for pixel-based positioning
 pid_yaw = [0.4, 0.4, 0]  # For yaw control (rotation based on pixel offset during tracking, or angle during alignment)
 pid_ud = [0.30, 0.15, 0]   # For up/down control (vertical translation based on pixel offset or direct y-coordinate error)
 pid_lr = [0.20, 0.15, 0]   # For left/right control (lateral translation based on pixel offset or direct x-coordinate error)
+pid_lr_yaw = [0.15, 0.15, 0] 
 
 def is_aligning_done(current_angle_yaw_rad, desired_angle_rad, angle_threshold_rad):
     """
