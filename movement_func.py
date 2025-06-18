@@ -31,6 +31,7 @@ def move_tello(drone, direction, distance, speed = 75):
         drone.send_rc_control(0, 0, -speed, 0)
 
     sleep(time)
+    return time
 
 def compound_move_tello(drone, direction1, distance1, direction2, distance2, speed=50):
     print(f"Moving in {direction1} {distance1}cm and {direction2} {distance2}cm")
@@ -76,6 +77,7 @@ def compound_move_tello(drone, direction1, distance1, direction2, distance2, spe
     drone.send_rc_control(x, y, z, 0)
 
     sleep(total_time)
+    return total_time
 
 
 def move_tello_bearing(drone, bearing, distance, speed = 75):
@@ -99,8 +101,9 @@ def move_tello_bearing(drone, bearing, distance, speed = 75):
 
     drone.send_rc_control(y, x, 0, 0)
     print(f"Sleep for {distance / speed}")
-    sleep(1)
-    # sleep(distance / speed)
+    # sleep(1)
+    sleep(distance / speed)
+    return distance / speed
 
 def turn_tello(drone, angle, speed = 30):
     """
@@ -168,3 +171,4 @@ def curve_tello(drone, x1, y1, z1, x2, y2, z2, speed = 50):
     dist = math.dist(p0, p1) + math.dist(p1, p2)
     
     sleep(dist / speed)
+    return dist / speed 
