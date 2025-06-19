@@ -30,6 +30,7 @@ KP_AREA = 0.1  # Forward/backward control
 KP_CENTER = 0.2  # Left/right control
 
 drone_took_off = False
+flight_time = 0
 stage = 1
 state = 0
 pid_errors = {
@@ -96,9 +97,6 @@ if __name__ == "__main__":
             if time.time() >= call_again:
                 stage, flight_time, state, pid_errors = pathing(tello, stage, tag_info, state, pid_errors, frame_siz)
                 call_again = time.time() + flight_time
-        
-        if stage == 6:
-            break
 
     tello.land()
     cv2.destroyAllWindows()

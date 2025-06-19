@@ -84,16 +84,13 @@ def pathing(tello, stage, detected_tags, state, pid_errors, frame_siz=[960, 720]
 		
 	elif stage == 2:  # Align with the first set of tags
 		target_1 = Target(id=1, area=956, x_offset_px=0, y_offset_px=-180, final_yaw_rad=0)
-		target_2 = Target(id=5, area=991, x_offset_px=105.8, y_offset_px=-335, final_yaw_rad=0)
-		tolerance = Tolerance(area_tracking=100, final_yaw_rad=0.1, final_position_px=70, offset_tracking_px=20)
+		tolerance = Tolerance(area_tracking=100, final_yaw_rad=0.1, final_position_px=70, offset_tracking_px=10)
 		
 		target_found = False
 		for tag in detected_tags:
 			current_target = None
 			if tag['tag_id'] == target_1.id:
 				current_target = target_1
-			elif tag['tag_id'] == target_2.id:
-				current_target = target_2
 
 			if current_target:
 				next_stage, flight_time, upd_state, upd_pid_errors = track_and_align_with_tag(
@@ -101,31 +98,25 @@ def pathing(tello, stage, detected_tags, state, pid_errors, frame_siz=[960, 720]
 				)
 				target_found = True
 				break
-		
 		if not target_found:
-			# If no target tag is found, hover and search
-			upd_state = STATE_IDLE
-			upd_pid_errors = DEFAULT_PID_ERRORS
+			tello.send_rc_control(0, 0, 0, 0)
+			upd_state = STATE_TRACKING
 			
 	elif stage == 3:  # Move the Tello forward
-		move_tello(tello, "forward", 20)
+		flight_time = move_tello(tello, "forward", 100)
 		next_stage = stage + 1
-		flight_time = 1
 		upd_state = STATE_TRACKING
 		upd_pid_errors = DEFAULT_PID_ERRORS
 
 	elif stage == 4: # Align with the second set of tags
-		target_1 = Target(id=1, area=5137, x_offset_px=-25, y_offset_px=284, final_yaw_rad=0)
-		target_2 = Target(id=5, area=5594, x_offset_px=351, y_offset_px=-213, final_yaw_rad=0)
-		tolerance = Tolerance(area_tracking=100, final_yaw_rad=0.1, final_position_px=20, offset_tracking_px=20)
+		target_1 = Target(id=1, area=4200, x_offset_px=-25, y_offset_px=0, final_yaw_rad=0)
+		tolerance = Tolerance(area_tracking=500, final_yaw_rad=0.1, final_position_px=20, offset_tracking_px=25)
 
 		target_found = False
 		for tag in detected_tags:
 			current_target = None
 			if tag['tag_id'] == target_1.id:
 				current_target = target_1
-			elif tag['tag_id'] == target_2.id:
-				current_target = target_2
 			
 			if current_target:
 				next_stage, flight_time, upd_state, upd_pid_errors = track_and_align_with_tag(
@@ -135,16 +126,114 @@ def pathing(tello, stage, detected_tags, state, pid_errors, frame_siz=[960, 720]
 				break
 		
 		if not target_found:
-			# If no target tag is found, hover and search
-			upd_state = STATE_IDLE
-			upd_pid_errors = DEFAULT_PID_ERRORS
+			tello.send_rc_control(0, 0, 0, 0)
+			upd_state = STATE_TRACKING
+		
 
-	elif stage == 5:
-		compound_move_tello(tello, "up", 50, "forward", 50)
+	elif stage == 5: #move through the second gate
 		next_stage = stage + 1
-		flight_time = 1
+		flight_time = compound_move_tello(tello, "up", 70, "forward", 150)
 		upd_state = STATE_IDLE
 		upd_pid_errors = DEFAULT_PID_ERRORS
+	
+	elif stage == 6:  #move in a curve to pass the first flag
+		curve_tello(tello, 75, -30, 0, 150, 0, 0)
+		next_stage = stage + 1
+		flight_time = 0.5
+		upd_state = STATE_IDLE
+		upd_pid_errors = DEFAULT_PID_ERRORS
+  
+	elif stage == 7: #move in a curve to pass the second flag
+		curve_tello(tello, 75, 30, 0, 150, 0, 0)
+		next_stage = stage + 1
+		flight_time = 0.5
+		upd_state = STATE_IDLE
+		upd_pid_errors = DEFAULT_PID_ERRORS
+	
+	elif stage == 8: #turn 90 degree
+		next_stage = stage + 1
+		flight_time = turn_tello(tello, 90, speed=50)
+		upd_state = STATE_IDLE
+		upd_pid_errors = DEFAULT_PID_ERRORS
+	
+	elif stage == 9: #stop the drone's movement
+		tello.send_rc_control(0, 0, 0, 0)
+		next_stage = stage + 1
+		flight_time = 0.2
+		upd_state = STATE_IDLE
+		upd_pid_errors = DEFAULT_PID_ERRORS
+	
+	elif stage == 10: #move the drone to infront of the tag
+		flight_time = compound_move_tello(tello, "down", 30, "left", 50)
+		next_stage = stage + 1
+		upd_state = STATE_TRACKING #Must BE STATE_TRACKING if the next stage in aligning!!!
+		upd_pid_errors = DEFAULT_PID_ERRORS
+	
+	# =================================================================== #
+	# AFTER THIS PART OF THE CODE, ALL VALUES NEED TO BE TUNED AND TESTED #
+	# =================================================================== #
+ 
+	elif stage == 12: #aligning with the tag
+		target_1 = Target(id=1, area=4200, x_offset_px=-25, y_offset_px=0, final_yaw_rad=0)
+		tolerance = Tolerance(area_tracking=500, final_yaw_rad=0.1, final_position_px=20, offset_tracking_px=25)
+
+		target_found = False
+		for tag in detected_tags:
+			current_target = None
+			if tag['tag_id'] == target_1.id:
+				current_target = target_1
+			
+			if current_target:
+				next_stage, flight_time, upd_state, upd_pid_errors = track_and_align_with_tag(
+					tello, stage, tag, state, pid_errors, frame_siz, current_target, tolerance
+				)
+				target_found = True
+				break
+		
+		if not target_found:
+			tello.send_rc_control(0, 0, 0, 0)
+			upd_state = STATE_TRACKING
+	
+	elif stage == 13:  # The drone move through the tunnel
+		flight_time = move_tello(tello, "forward", 100)
+		next_stage = stage + 1
+		upd_state = STATE_IDLE
+		upd_pid_errors = DEFAULT_PID_ERRORS
+	
+	elif stage == 14: # Turn 90 degree
+		next_stage = stage + 1
+		flight_time = turn_tello(tello, 90, speed=50)
+		upd_state = STATE_IDLE
+		upd_pid_errors = DEFAULT_PID_ERRORS
+  
+	elif stage == 15: # Move the drone to infront of the next tag
+		flight_time = compound_move_tello(tello, "down", 30, "left", 50)
+		next_stage = stage + 1
+		upd_state = STATE_TRACKING #Must BE STATE_TRACKING if the next stage in aligning!!!
+		upd_pid_errors = DEFAULT_PID_ERRORS
+	
+	elif stage == 16: #aligning with the tag
+		target_1 = Target(id=1, area=4200, x_offset_px=-25, y_offset_px=0, final_yaw_rad=0)
+		tolerance = Tolerance(area_tracking=500, final_yaw_rad=0.1, final_position_px=20, offset_tracking_px=25)
+
+		target_found = False
+		for tag in detected_tags:
+			current_target = None
+			if tag['tag_id'] == target_1.id:
+				current_target = target_1
+			
+			if current_target:
+				next_stage, flight_time, upd_state, upd_pid_errors = track_and_align_with_tag(
+					tello, stage, tag, state, pid_errors, frame_siz, current_target, tolerance
+				)
+				target_found = True
+				break
+		
+		if not target_found:
+			tello.send_rc_control(0, 0, 0, 0)
+			upd_state = STATE_TRACKING
+	
+	
 			
 	return next_stage, flight_time, upd_state, upd_pid_errors
 

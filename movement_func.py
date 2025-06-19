@@ -4,7 +4,7 @@ import math
 
 # Tello Movement Functions
 
-def move_tello(drone, direction, distance, speed = 75):
+def move_tello(drone, direction, distance, speed = 50):
     """
     Moves the Tello drone in a specified direction for a given distance at a given speed.
     Args:
@@ -30,7 +30,6 @@ def move_tello(drone, direction, distance, speed = 75):
     elif direction == "down":
         drone.send_rc_control(0, 0, -speed, 0)
 
-    sleep(time)
     return time
 
 def compound_move_tello(drone, direction1, distance1, direction2, distance2, speed=50):
@@ -76,11 +75,10 @@ def compound_move_tello(drone, direction1, distance1, direction2, distance2, spe
 
     drone.send_rc_control(x, y, z, 0)
 
-    sleep(total_time)
     return total_time
 
 
-def move_tello_bearing(drone, bearing, distance, speed = 75):
+def move_tello_bearing(drone, bearing, distance, speed = 50):
     """
     Moves the Tello drone in a specified bearing for a given distance at a given speed.
     Args:
@@ -92,18 +90,12 @@ def move_tello_bearing(drone, bearing, distance, speed = 75):
     if not 0 <= bearing < 360:
         raise ValueError("Bearing must be between 0 and 360 degrees.")
 
-    print(f"Moving {distance}cm at {bearing}deg")
-
     radians = math.radians(bearing)
     x = int(distance * math.cos(radians))
     y = int(distance * math.sin(radians))
-    print(f"Moving with {y} lr and {x} fb")
 
-    drone.send_rc_control(y, x, 0, 0)
-    print(f"Sleep for {distance / speed}")
-    # sleep(1)
+    drone.send_rc_control(x, y, 0, 0)
     sleep(distance / speed)
-    return distance / speed
 
 def turn_tello(drone, angle, speed = 30):
     """
@@ -113,6 +105,7 @@ def turn_tello(drone, angle, speed = 30):
         angle (float): Angle to turn in degrees. Positive for clockwise, negative for counterclockwise.
         speed (int, optional): Rotational speed in degrees/s. Default is 30.
     """
+    angle *= 2
     time = abs(angle) / speed
 
     if angle > 0:
@@ -169,6 +162,4 @@ def curve_tello(drone, x1, y1, z1, x2, y2, z2, speed = 50):
 
     # Estimate time to complete (distance/speed)
     dist = math.dist(p0, p1) + math.dist(p1, p2)
-    
-    sleep(dist / speed)
-    return dist / speed 
+    return dist / speed
